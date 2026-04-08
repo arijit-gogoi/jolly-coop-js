@@ -17,6 +17,8 @@
   "scripts": {
     "build": "tsup src/index.ts --format esm --dts",
     "test": "vitest run",
+    "test:bun": "bun run test",
+    "test:deno": "deno run -A npm:vitest run",
     "test:watch": "vitest",
     "bench": "tsx --expose-gc bench/index.ts",
     "bench:ci": "tsx --expose-gc bench/index.ts --json",

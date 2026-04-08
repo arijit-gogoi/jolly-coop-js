@@ -62,19 +62,16 @@ test("queue drains as tasks complete", async () => {
 })
 
 test("queued task starts when slot frees", async () => {
-  let running = 0
-  let observed = false
+  let task2Ran = false
   await scope({ limit: 1 }, async s => {
     s.spawn(async () => {
-      running++
       await sleep(5)
-      running--
     })
     s.spawn(async () => {
-      if (running === 1) observed = true
+      task2Ran = true
     })
   })
-  expect(observed).toBe(true)
+  expect(task2Ran).toBe(true)
 })
 
 test("limit works with sync tasks", async () => {

@@ -1,7 +1,7 @@
 import type { Scope, ScopeOptions, Task } from "./types.js"
 import { TaskImpl } from "./task.js"
 import { TimeoutError } from "./errors.js"
-import { schedule, runWithSignal } from "./scheduler.js"
+import { schedule, runWithSignal, getCurrentSignal } from "./scheduler.js"
 
 class ScopeImpl {
   private abortController = new AbortController()
@@ -53,6 +53,8 @@ class ScopeImpl {
     if (this.limit !== undefined && this.runningCount >= this.limit) {
       this.limitQueue.push(task as TaskImpl<unknown>)
     } else {
+      // FIX 1: Increment runningCount at spawn time, not execution time
+      if (this.limit !== undefined) this.runningCount++
       this.scheduleTask(task as TaskImpl<unknown>)
     }
 
@@ -68,17 +70,22 @@ class ScopeImpl {
     if (this.cancelled && task.internalState === "created") {
       task.transition("cancelled")
       task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+      // FIX 1: Decrement runningCount in early-cancel path
+      if (this.limit !== undefined) {
+        this.runningCount--
+        this.dequeueNext()
+      }
       this.taskDone()
       return
     }
 
     task.transition("running")
-    if (this.limit !== undefined) this.runningCount++
+    // runningCount already incremented at spawn/dequeue time
 
     try {
       const result = await runWithSignal(this.signal, task.fn)
 
-      if (task.internalState !== "running") return // already transitioned (e.g. cancelled)
+      if (task.internalState !== "running") return // already transitioned
 
       if (this.cancelled) {
         task.transition("cancelled")
@@ -96,11 +103,16 @@ class ScopeImpl {
       } else {
         task.transition("failed")
         task.reject(err)
-        if (!this.hasError) {
-          this.hasError = true
-          this.firstError = err
-        }
-        this.cancel(err)
+        // FIX 2: Defer scope cancellation — only cancel if error wasn't observed
+        Promise.resolve().then(() => {
+          if (!task.observed) {
+            if (!this.hasError) {
+              this.hasError = true
+              this.firstError = err
+            }
+            this.cancel(err)
+          }
+        })
       }
     } finally {
       if (this.limit !== undefined) {
@@ -120,6 +132,8 @@ class ScopeImpl {
         this.taskDone()
         continue
       }
+      // FIX 1: Increment runningCount at dequeue time
+      if (this.limit !== undefined) this.runningCount++
       this.scheduleTask(next)
       break
     }
@@ -159,12 +173,11 @@ class ScopeImpl {
   }
 
   private async cleanupResources(): Promise<void> {
-    // Reverse order
     for (let i = this.resources.length - 1; i >= 0; i--) {
       try {
         await this.resources[i].disposer(this.resources[i].value)
       } catch {
-        // Disposer errors are contained — don't break cleanup
+        // Disposer errors are contained
       }
     }
   }
@@ -206,19 +219,16 @@ class ScopeImpl {
       get active() { return 0 },
     }
 
-    // Fix proxy getters to use ScopeImpl
     Object.defineProperty(proxy, "signal", { get: () => this.signal })
     Object.defineProperty(proxy, "active", { get: () => this.active })
 
     let rootResult: T | undefined
-    let rootError: unknown = undefined
     let rootThrew = false
 
     try {
       rootResult = await fn(proxy)
     } catch (err) {
       rootThrew = true
-      rootError = err
       if (!this.hasError) {
         this.hasError = true
         this.firstError = err
@@ -250,7 +260,14 @@ class ScopeImpl {
       throw this.firstError
     }
     if (this.cancelled) {
-      throw this.abortController.signal.reason ?? new Error("Scope cancelled")
+      // If every spawned task reached "completed", cancel had no effect — resolve normally
+      let allCompleted = this.tasks.size > 0
+      for (const t of this.tasks) {
+        if (t.internalState !== "completed") { allCompleted = false; break }
+      }
+      if (!allCompleted) {
+        throw this.abortController.signal.reason ?? new Error("Scope cancelled")
+      }
     }
     return rootResult as T
   }
@@ -271,6 +288,12 @@ export function scope<T>(
   } else {
     options = optionsOrFn
     fn = maybeFn!
+  }
+
+  // FIX 4: Propagate parent signal to nested scopes
+  const parentSignal = getCurrentSignal()
+  if (parentSignal && !options.signal) {
+    options = { ...options, signal: parentSignal }
   }
 
   const impl = new ScopeImpl(options)

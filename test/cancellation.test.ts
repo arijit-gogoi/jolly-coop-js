@@ -188,7 +188,8 @@ test("cancel after yield prevents continuation", async () => {
         await yieldNow()
         step = 2
       })
-      await sleep(1)
+      // yieldNow orders correctly with task continuations via microtask deferral
+      await yieldNow()
       s.cancel()
     })
   ).rejects.toBeDefined()

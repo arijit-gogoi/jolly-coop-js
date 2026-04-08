@@ -15,6 +15,7 @@ export class TaskImpl<T> {
   private _state: TaskState = "created"
   private _resolve!: (value: T) => void
   private _reject!: (reason: unknown) => void
+  private _observed = false
   readonly promise: Promise<T>
   readonly fn: () => Promise<T> | T
 
@@ -25,6 +26,12 @@ export class TaskImpl<T> {
       this._resolve = resolve
       this._reject = reject
     })
+    // Suppress unhandled rejection — errors are managed by the scope
+    this.promise.catch(() => {})
+  }
+
+  get observed(): boolean {
+    return this._observed
   }
 
   get internalState(): TaskState {
@@ -55,6 +62,7 @@ export class TaskImpl<T> {
     onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
     onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
+    this._observed = true
     return this.promise.then(onfulfilled, onrejected)
   }
 }

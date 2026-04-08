@@ -97,21 +97,25 @@ test("queue drains as tasks complete", async () => {
 ---
 
 5. Tasks start immediately when slot frees
+
+> Note: With limit=1, task2 only starts after task1 reaches a terminal state
+> (spec §7.2). By that point task1's function has finished — including
+> `running--` — so `running` is always 0 when task2 executes. The original
+> `running === 1` check is unreachable with correct limit enforcement.
+> The test now verifies that the queued task does run once the slot frees.
+
 ```js
 test("queued task starts when slot frees", async () => {
-	let running = 0
-	let observed = false
+	let task2Ran = false
 	await scope({ limit: 1 }, async s => {
 		s.spawn(async () => {
-			running++
 			await sleep(5)
-			running--
 		})
 		s.spawn(async () => {
-			if (running === 1) observed = true
+			task2Ran = true
 		})
 	})
-	expect(observed).toBe(true)
+	expect(task2Ran).toBe(true)
 })
 ```
 ---

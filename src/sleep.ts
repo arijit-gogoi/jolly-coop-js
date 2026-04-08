@@ -26,7 +26,27 @@ export function sleep(ms: number): Promise<void> {
 }
 
 export function yieldNow(): Promise<void> {
-  return new Promise<void>(resolve => {
-    schedule(resolve)
+  const signal = getCurrentSignal()
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason)
+      return
+    }
+    schedule(() => {
+      if (signal) {
+        // Signal-aware: defer by one microtask so peer immediate-resolves
+        // (e.g. root-fn resume → cancel) fire their continuations first
+        Promise.resolve().then(() => {
+          if (signal.aborted) {
+            reject(signal.reason)
+          } else {
+            resolve()
+          }
+        })
+      } else {
+        // No signal context: resolve immediately
+        resolve()
+      }
+    })
   })
 }

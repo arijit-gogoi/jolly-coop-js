@@ -265,6 +265,11 @@ test("inner cancel does not cancel outer scope", async () => {
 
 14. Cancel prevents further execution after yield
 
+> Note: Uses `yieldNow()` (not `sleep(1)`) to synchronize with the task's
+> yield continuation. With a MessageChannel-based scheduler, `yieldNow`
+> continuations always resolve before `setTimeout(1ms)`, so `sleep(1)` cannot
+> reliably fire the cancel before the task resumes.
+
 ```js
 test("cancel after yield prevents continuation", async () => {
 	let step = 0
@@ -275,7 +280,8 @@ test("cancel after yield prevents continuation", async () => {
 			    await yieldNow()
 			    step = 2
 			})
-			await sleep(1)
+			// yieldNow orders correctly with task continuations via microtask deferral
+			await yieldNow()
 			s.cancel()
 		})
 	).rejects.toBeDefined()

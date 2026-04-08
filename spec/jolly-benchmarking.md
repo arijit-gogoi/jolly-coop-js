@@ -51,7 +51,7 @@ Latency should be reported as percentile distributions: p50, p95, and p99. Media
 
 Event loop lag is the single most important metric in the suite. It measures how much the scheduler delays the JavaScript event loop — specifically, how much timers and I/O callbacks are delayed beyond their expected firing time.
 
-This metric directly validates the implementation strategy's core design decision: using `MessageChannel` with a hybrid execution budget (capped at `MAX_TASKS = 500` tasks or `MAX_TIME = 5ms` per drain cycle) to avoid starving the event loop. If event loop lag is high, the budget is too aggressive. If it's near zero, the scheduler is yielding correctly.
+This metric directly validates the implementation strategy's core design decision: using `MessageChannel` with a hybrid execution budget (capped at `MAX_TASKS = 5000` tasks or `MAX_TIME = 5ms` per drain cycle) to avoid starving the event loop. If event loop lag is high, the budget is too aggressive. If it's near zero, the scheduler is yielding correctly.
 
 Event loop lag is measured by scheduling a recurring `setInterval` timer at a known interval and comparing the actual elapsed time against the expected elapsed time. The difference is the lag:
 
@@ -411,7 +411,7 @@ Benchmarks should run on every release and optionally on every commit to a main 
 
 ## 10. Using Benchmarks to Tune the Scheduler
 
-The benchmark suite is not just a validation tool — it is the primary instrument for tuning the scheduler's execution budget. The implementation strategy defines default values (`MAX_TASKS = 500`, `MAX_TIME = 5ms`), but these defaults should be verified and potentially adjusted based on benchmark results.
+The benchmark suite is not just a validation tool — it is the primary instrument for tuning the scheduler's execution budget. The implementation strategy defines default values (`MAX_TASKS = 5000`, `MAX_TIME = 5ms`), but these defaults should be verified and potentially adjusted based on benchmark results.
 
 The tuning process is:
 

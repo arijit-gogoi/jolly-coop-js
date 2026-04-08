@@ -220,7 +220,7 @@ Time-based budgets are strictly better for responsiveness because they adapt to 
 The best v1 strategy combines both: a **maximum task count** and a **maximum time slice**. The scheduler yields when either limit is hit first:
 
 ```javascript
-const MAX_TASKS = 500
+const MAX_TASKS = 5000
 const MAX_TIME = 5 // milliseconds
 
 function drain() {
@@ -247,7 +247,7 @@ The count limit provides a safety net for pathological cases where `performance.
 
 For Jolly v1, the recommended starting configuration is:
 
-- `MAX_TASKS = 500`
+- `MAX_TASKS = 5000`
 - `MAX_TIME = 5` (milliseconds)
 
 This provides good throughput without starving the event loop, and works well across Node.js and browser environments. These values can be adjusted based on benchmarking, but they are a safe, boring starting point.
@@ -398,7 +398,7 @@ The following decisions are final for Jolly v1 and should not be revisited witho
 
 **Determinism scope:** Task lifecycle, cancellation propagation, and scope completion are deterministic. Scheduling order is not deterministic and is not guaranteed.
 
-**Default tuning:** `MAX_TASKS = 500`, `MAX_TIME = 5ms`. Tasks should yield via `yieldNow()` in long-running loops.
+**Default tuning:** `MAX_TASKS = 5000`, `MAX_TIME = 5ms`. Tasks should yield via `yieldNow()` in long-running loops.
 
 **Complexity budget:** The scheduler should be approximately 150–200 lines of code. If it grows significantly beyond this, the design is too complex for v1.
 

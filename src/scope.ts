@@ -40,6 +40,7 @@ class ScopeImpl {
 
   spawn<T>(fn: () => Promise<T> | T): Task<T> {
     const task = new TaskImpl<T>(fn)
+    task._scope = this
     this.tasks.add(task as TaskImpl<unknown>)
     this.pendingCount++
 
@@ -62,10 +63,11 @@ class ScopeImpl {
   }
 
   private scheduleTask(task: TaskImpl<unknown>): void {
-    schedule(() => this.executeTask(task))
+    schedule(task)
   }
 
-  private executeTask(task: TaskImpl<unknown>): void {
+  /** @internal — called by TaskImpl._run() via scheduler */
+  executeTask(task: TaskImpl<unknown>): void {
     // If scope was cancelled before this task runs
     if (this.cancelled && task.internalState === "created") {
       task.transition("cancelled")

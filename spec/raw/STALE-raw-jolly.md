@@ -1,4 +1,4 @@
-
+> **STALE / SCRATCH** — This is an early unstructured draft. The authoritative specs are in `spec/jolly-coop.md`, `spec/jolly-strategy.md`, and `spec/jolly-benchmarking.md`. Do not rely on values or decisions in this file.
 
 ---
 Below is a concise, formal specification for Jolly v1. It defines the API surface, behavioral semantics, guarantees, and error model so that other developers can rely on the runtime contract.

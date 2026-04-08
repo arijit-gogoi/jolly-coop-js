@@ -1,3 +1,5 @@
+> **STALE / SCRATCH** — This is an early unstructured draft. The authoritative specs are in `spec/jolly-coop.md`, `spec/jolly-strategy.md`, and `spec/jolly-benchmarking.md`. Do not rely on values or decisions in this file.
+
 These are foundational runtime decisions. If you get them wrong, everything above (scopes, cancellation, fairness) becomes unstable.
 
 I’ll answer each precisely and then give you the recommended v1 design.

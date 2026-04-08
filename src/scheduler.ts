@@ -1,36 +1,37 @@
-const MAX_TASKS = 500
+const MAX_TASKS = 5000
 const MAX_TIME = 5 // milliseconds
+const INITIAL_BUFFER = 131072 // pre-allocate for 100k+ workloads without resize
 
-type Callback = () => void
+// Schedulable: plain callback or object with _run() — avoids per-task closure allocation
+type Schedulable = (() => void) | { _run(): void }
 
-// Ring buffer queue — O(1) push and shift, avoids Array.shift() O(n) at scale
-let _buf: (Callback | undefined)[] = new Array(1024)
+// Ring buffer queue — O(1) push and shift
+let _buf: (Schedulable | undefined)[] = new Array(INITIAL_BUFFER)
 let _head = 0
 let _tail = 0
 let _size = 0
 
-function qPush(cb: Callback) {
+function qPush(entry: Schedulable) {
   if (_size === _buf.length) {
-    // Double capacity and repack
     const len = _buf.length
-    const next = new Array(len * 2) as (Callback | undefined)[]
+    const next = new Array(len * 2) as (Schedulable | undefined)[]
     for (let i = 0; i < _size; i++) next[i] = _buf[(_head + i) % len]
     _buf = next
     _head = 0
     _tail = _size
   }
-  _buf[_tail] = cb
+  _buf[_tail] = entry
   _tail = (_tail + 1) % _buf.length
   _size++
 }
 
-function qShift(): Callback | undefined {
+function qShift(): Schedulable | undefined {
   if (_size === 0) return undefined
-  const cb = _buf[_head]
-  _buf[_head] = undefined // release reference
+  const entry = _buf[_head]
+  _buf[_head] = undefined
   _head = (_head + 1) % _buf.length
   _size--
-  return cb
+  return entry
 }
 
 let scheduled = false
@@ -51,8 +52,9 @@ function drain() {
   const start = performance.now()
 
   while (_size > 0) {
-    const cb = qShift()!
-    cb()
+    const entry = qShift()!
+    if (typeof entry === "function") entry()
+    else entry._run()
 
     if (++count >= MAX_TASKS || performance.now() - start > MAX_TIME) {
       if (_size > 0) {
@@ -70,8 +72,8 @@ function scheduleNextTick() {
   }
 }
 
-export function schedule(callback: Callback): void {
-  qPush(callback)
+export function schedule(entry: Schedulable): void {
+  qPush(entry)
   scheduleNextTick()
 }
 

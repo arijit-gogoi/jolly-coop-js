@@ -1,5 +1,6 @@
 import type { TaskState } from "./types.js"
 
+const noop = () => {}
 let nextId = 1
 
 const VALID_TRANSITIONS: Record<string, Set<string>> = {
@@ -18,6 +19,8 @@ export class TaskImpl<T> {
   private _observed = false
   readonly promise: Promise<T>
   readonly fn: () => Promise<T> | T
+  // Scope back-reference for closure-free scheduling
+  _scope: { executeTask(task: TaskImpl<unknown>): void } | null = null
 
   constructor(fn: () => Promise<T> | T) {
     this.id = nextId++
@@ -27,7 +30,7 @@ export class TaskImpl<T> {
       this._reject = reject
     })
     // Suppress unhandled rejection — errors are managed by the scope
-    this.promise.catch(() => {})
+    this.promise.catch(noop)
   }
 
   get observed(): boolean {
@@ -56,6 +59,10 @@ export class TaskImpl<T> {
 
   reject(reason: unknown): void {
     this._reject(reason)
+  }
+
+  _run(): void {
+    this._scope!.executeTask(this as TaskImpl<unknown>)
   }
 
   then<TResult1 = T, TResult2 = never>(

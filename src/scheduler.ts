@@ -3,7 +3,36 @@ const MAX_TIME = 5 // milliseconds
 
 type Callback = () => void
 
-const queue: Callback[] = []
+// Ring buffer queue — O(1) push and shift, avoids Array.shift() O(n) at scale
+let _buf: (Callback | undefined)[] = new Array(1024)
+let _head = 0
+let _tail = 0
+let _size = 0
+
+function qPush(cb: Callback) {
+  if (_size === _buf.length) {
+    // Double capacity and repack
+    const len = _buf.length
+    const next = new Array(len * 2) as (Callback | undefined)[]
+    for (let i = 0; i < _size; i++) next[i] = _buf[(_head + i) % len]
+    _buf = next
+    _head = 0
+    _tail = _size
+  }
+  _buf[_tail] = cb
+  _tail = (_tail + 1) % _buf.length
+  _size++
+}
+
+function qShift(): Callback | undefined {
+  if (_size === 0) return undefined
+  const cb = _buf[_head]
+  _buf[_head] = undefined // release reference
+  _head = (_head + 1) % _buf.length
+  _size--
+  return cb
+}
+
 let scheduled = false
 
 // Platform-adaptive trigger: MessageChannel primary, setTimeout fallback
@@ -21,12 +50,12 @@ function drain() {
   let count = 0
   const start = performance.now()
 
-  while (queue.length > 0) {
-    const cb = queue.shift()!
+  while (_size > 0) {
+    const cb = qShift()!
     cb()
 
     if (++count >= MAX_TASKS || performance.now() - start > MAX_TIME) {
-      if (queue.length > 0) {
+      if (_size > 0) {
         scheduleNextTick()
       }
       return
@@ -42,7 +71,7 @@ function scheduleNextTick() {
 }
 
 export function schedule(callback: Callback): void {
-  queue.push(callback)
+  qPush(callback)
   scheduleNextTick()
 }
 

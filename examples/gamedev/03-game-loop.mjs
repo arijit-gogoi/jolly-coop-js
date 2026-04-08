@@ -78,8 +78,8 @@ async function menuScene() {
 
     await sleep(200) // player "presses start"
     emit("scene:menu — start pressed")
-    s.cancel()
-  }).catch(() => {})
+    s.done()
+  })
 }
 
 async function gameplayScene() {
@@ -130,8 +130,8 @@ async function gameplayScene() {
     })
 
     emit(`scene:gameplay — victory! ${frames.count} total frames`)
-    s.cancel() // stop systems
-  }).catch(() => {})
+    s.done() // stop background systems gracefully
+  })
 }
 
 async function gameOverScene() {

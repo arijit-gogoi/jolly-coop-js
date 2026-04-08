@@ -4,7 +4,7 @@
 Jolly is a structured concurrency runtime for JS (Node, Bun, Deno, browser). Scoped task lifetimes, guaranteed cleanup, cooperative cancellation via AbortSignal, first-error-wins semantics.
 
 ## Core API
-`scope`, `spawn`, `resource`, `cancel`, `sleep`, `yieldNow`
+`scope`, `spawn`, `resource`, `cancel`, `done`, `sleep`, `yieldNow`
 
 ## Architecture Constraints
 - Microtasks must NEVER be used as a scheduling primitive (they starve I/O, timers, rendering)

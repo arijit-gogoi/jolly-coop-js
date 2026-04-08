@@ -5,6 +5,7 @@ export interface Scope {
     disposer: (value: T) => Promise<void> | void
   ): Promise<T>
   cancel(reason?: unknown): void
+  done(): void
   readonly signal: AbortSignal
   readonly active: number
 }

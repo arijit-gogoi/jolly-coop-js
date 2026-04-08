@@ -80,6 +80,7 @@ export interface Scope {
   ): Promise<T>
 
   cancel(reason?: any): void
+  done(): void
 
   readonly signal: AbortSignal
 }
@@ -130,9 +131,13 @@ Resources are cleaned up in **reverse registration order** — the last resource
 
 ### 3.7 `Scope.cancel(reason?)`
 
-Manually cancels the scope. This marks the scope as cancelled, triggers the abort signal, and propagates cancellation to all child tasks and child scopes. An optional reason may be provided for diagnostic purposes. Calling `cancel` multiple times is safe and idempotent.
+Manually cancels the scope. This marks the scope as cancelled, triggers the abort signal, and propagates cancellation to all child tasks and child scopes. An optional reason may be provided for diagnostic purposes. Calling `cancel` multiple times is safe and idempotent. The scope rejects with the cancellation reason.
 
-### 3.8 `Scope.signal`
+### 3.8 `Scope.done()`
+
+Signals that the scope's work is complete. Like `cancel`, this triggers the abort signal so background tasks can wind down. Unlike `cancel`, the scope resolves normally instead of rejecting. Errors still take precedence — if a task error occurred before `done()`, the scope rejects with that error. If `cancel()` was called before `done()`, cancel wins. Idempotent.
+
+### 3.9 `Scope.signal`
 
 A read-only `AbortSignal` tied to the scope's lifetime. Tasks can pass this signal to cancellation-aware APIs like `fetch`, readable streams, or any other API that accepts an `AbortSignal`. When the scope is cancelled, this signal aborts automatically.
 

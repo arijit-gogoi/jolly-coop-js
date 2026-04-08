@@ -11,6 +11,7 @@ class ScopeImpl {
   private cancelled = false
   private firstError: unknown = null
   private hasError = false
+  private _doneGracefully = false
   private settled = false
   private _resolveAllTasks!: () => void
   private allTasksSettled: Promise<void>
@@ -186,6 +187,12 @@ class ScopeImpl {
     }
   }
 
+  done(): void {
+    if (this.cancelled) return
+    this._doneGracefully = true
+    this.cancel()
+  }
+
   async resource<T>(
     value: Promise<T> | T,
     disposer: (value: T) => Promise<void> | void
@@ -238,6 +245,7 @@ class ScopeImpl {
       resource: <U>(value: Promise<U> | U, disposer: (value: U) => Promise<void> | void) =>
         this.resource(value, disposer),
       cancel: (reason?: unknown) => this.cancel(reason),
+      done: () => this.done(),
       get signal() { return this.signal },
       get active() { return 0 },
     }
@@ -282,7 +290,7 @@ class ScopeImpl {
     if (this.hasError) {
       throw this.firstError
     }
-    if (this.cancelled) {
+    if (this.cancelled && !this._doneGracefully) {
       // If every spawned task reached "completed", cancel had no effect — resolve normally
       let allCompleted = this.tasks.size > 0
       for (const t of this.tasks) {

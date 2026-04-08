@@ -241,3 +241,75 @@ test("cancel prevents task completion after cancellation", async () => {
   ).rejects.toBeDefined()
   expect(finished).toBe(false)
 })
+
+// --- done() tests ---
+
+test("done() resolves scope normally", async () => {
+  const result = await scope(async s => {
+    s.spawn(async () => {
+      while (!s.signal.aborted) await sleep(10)
+    })
+    await sleep(30)
+    s.done()
+    return "ok"
+  })
+  expect(result).toBe("ok")
+})
+
+test("done() aborts signal so background tasks stop", async () => {
+  let signalAborted = false
+  await scope(async s => {
+    s.spawn(async () => {
+      try { while (!s.signal.aborted) await sleep(10) }
+      finally { signalAborted = s.signal.aborted }
+    })
+    await sleep(30)
+    s.done()
+  })
+  expect(signalAborted).toBe(true)
+})
+
+test("done() is idempotent", async () => {
+  await scope(async s => {
+    s.spawn(async () => {
+      while (!s.signal.aborted) await sleep(10)
+    })
+    await sleep(20)
+    s.done()
+    s.done()
+    s.done()
+  })
+})
+
+test("error before done() still throws", async () => {
+  await expect(
+    scope(async s => {
+      s.spawn(async () => { throw new Error("boom") })
+      await sleep(20)
+      s.done()
+    })
+  ).rejects.toThrow("boom")
+})
+
+test("cancel() before done() — cancel wins", async () => {
+  await expect(
+    scope(async s => {
+      s.spawn(async () => { await sleep(10_000) })
+      s.cancel()
+      s.done()
+    })
+  ).rejects.toBeDefined()
+})
+
+test("done() cleans up resources", async () => {
+  let disposed = false
+  await scope(async s => {
+    await s.resource(42, () => { disposed = true })
+    s.spawn(async () => {
+      while (!s.signal.aborted) await sleep(10)
+    })
+    await sleep(20)
+    s.done()
+  })
+  expect(disposed).toBe(true)
+})

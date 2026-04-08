@@ -2,6 +2,7 @@
   "name": "jolly",
   "version": "0.0.1",
   "description": "Structured concurrency runtime for JavaScript",
+  "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

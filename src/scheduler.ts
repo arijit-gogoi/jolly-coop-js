@@ -37,13 +37,25 @@ function qShift(): Schedulable | undefined {
 let scheduled = false
 
 // Platform-adaptive trigger: MessageChannel primary, setTimeout fallback
-const trigger: () => void = (() => {
+// idle() nulls the onmessage handler so the port doesn't keep the event loop alive
+const { trigger, idle } = (() => {
   if (typeof MessageChannel !== "undefined") {
     const channel = new MessageChannel()
-    channel.port1.onmessage = drain
-    return () => channel.port2.postMessage(0)
+    return {
+      trigger: () => {
+        channel.port1.onmessage = drain
+        channel.port2.postMessage(0)
+      },
+      idle: () => {
+        channel.port1.onmessage = null
+        scheduled = false
+      },
+    }
   }
-  return () => setTimeout(drain, 0)
+  return {
+    trigger: () => setTimeout(drain, 0),
+    idle: () => {},
+  }
 })()
 
 function drain() {
@@ -59,10 +71,13 @@ function drain() {
     if (++count >= MAX_TASKS || performance.now() - start > MAX_TIME) {
       if (_size > 0) {
         scheduleNextTick()
+      } else {
+        idle()
       }
       return
     }
   }
+  idle()
 }
 
 function scheduleNextTick() {

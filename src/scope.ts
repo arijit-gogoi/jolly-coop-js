@@ -139,7 +139,7 @@ class ScopeImpl {
     }
   }
 
-  private handleTaskFinally(task: TaskImpl<unknown>): void {
+  private handleTaskFinally(_task: TaskImpl<unknown>): void {
     if (this.limit !== undefined) {
       this.runningCount--
       this.dequeueNext()
@@ -254,12 +254,10 @@ class ScopeImpl {
     Object.defineProperty(proxy, "active", { get: () => this.active })
 
     let rootResult: T | undefined
-    let rootThrew = false
 
     try {
       rootResult = await fn(proxy)
     } catch (err) {
-      rootThrew = true
       if (!this.hasError) {
         this.hasError = true
         this.firstError = err

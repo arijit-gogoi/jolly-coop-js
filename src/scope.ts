@@ -65,12 +65,11 @@ class ScopeImpl {
     schedule(() => this.executeTask(task))
   }
 
-  private async executeTask(task: TaskImpl<unknown>): Promise<void> {
+  private executeTask(task: TaskImpl<unknown>): void {
     // If scope was cancelled before this task runs
     if (this.cancelled && task.internalState === "created") {
       task.transition("cancelled")
       task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
-      // FIX 1: Decrement runningCount in early-cancel path
       if (this.limit !== undefined) {
         this.runningCount--
         this.dequeueNext()
@@ -80,47 +79,69 @@ class ScopeImpl {
     }
 
     task.transition("running")
-    // runningCount already incremented at spawn/dequeue time
 
+    let result: unknown
     try {
-      const result = await runWithSignal(this.signal, task.fn)
-
-      if (task.internalState !== "running") return // already transitioned
-
-      if (this.cancelled) {
-        task.transition("cancelled")
-        task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
-      } else {
-        task.transition("completed")
-        task.resolve(result)
-      }
+      result = runWithSignal(this.signal, task.fn)
     } catch (err) {
-      if (task.internalState !== "running") return
-
-      if (this.cancelled) {
-        task.transition("cancelled")
-        task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
-      } else {
-        task.transition("failed")
-        task.reject(err)
-        // FIX 2: Defer scope cancellation — only cancel if error wasn't observed
-        Promise.resolve().then(() => {
-          if (!task.observed) {
-            if (!this.hasError) {
-              this.hasError = true
-              this.firstError = err
-            }
-            this.cancel(err)
-          }
-        })
-      }
-    } finally {
-      if (this.limit !== undefined) {
-        this.runningCount--
-        this.dequeueNext()
-      }
-      this.taskDone()
+      // Synchronous throw
+      this.handleTaskError(task, err)
+      this.handleTaskFinally(task)
+      return
     }
+
+    // Detect promise vs sync result
+    if (result != null && typeof (result as any).then === "function") {
+      // Async path — task returned a promise/thenable
+      ;(result as Promise<unknown>).then(
+        value => this.handleTaskSuccess(task, value),
+        err => this.handleTaskError(task, err)
+      ).then(() => this.handleTaskFinally(task))
+    } else {
+      // Sync fast path — no await overhead
+      this.handleTaskSuccess(task, result)
+      this.handleTaskFinally(task)
+    }
+  }
+
+  private handleTaskSuccess(task: TaskImpl<unknown>, value: unknown): void {
+    if (task.internalState !== "running") return
+    if (this.cancelled) {
+      task.transition("cancelled")
+      task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+    } else {
+      task.transition("completed")
+      task.resolve(value)
+    }
+  }
+
+  private handleTaskError(task: TaskImpl<unknown>, err: unknown): void {
+    if (task.internalState !== "running") return
+    if (this.cancelled) {
+      task.transition("cancelled")
+      task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+    } else {
+      task.transition("failed")
+      task.reject(err)
+      // Defer scope cancellation — only cancel if error wasn't observed
+      Promise.resolve().then(() => {
+        if (!task.observed) {
+          if (!this.hasError) {
+            this.hasError = true
+            this.firstError = err
+          }
+          this.cancel(err)
+        }
+      })
+    }
+  }
+
+  private handleTaskFinally(task: TaskImpl<unknown>): void {
+    if (this.limit !== undefined) {
+      this.runningCount--
+      this.dequeueNext()
+    }
+    this.taskDone()
   }
 
   private dequeueNext(): void {

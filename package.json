@@ -20,6 +20,7 @@
     "test:bun": "bun run test",
     "test:deno": "deno run -A npm:vitest run",
     "test:watch": "vitest",
+    "examples": "npm run build && node examples/run.mjs",
     "bench": "tsx --expose-gc bench/index.ts",
     "bench:ci": "tsx --expose-gc bench/index.ts --json",
     "typecheck": "tsc --noEmit"

@@ -58,6 +58,23 @@ export function monitorLag(interval = 10) {
   }
 }
 
+// Cross-runtime memory adapter — lives in bench code, not the library
+export function getHeapUsed(): number | undefined {
+  // Deno first — it polyfills `process` in some compat modes
+  if (typeof (globalThis as any).Deno?.memoryUsage === "function")
+    return (globalThis as any).Deno.memoryUsage().heapUsed
+  // Node / Bun (Bun provides process.memoryUsage compat)
+  if (typeof globalThis.process?.memoryUsage === "function")
+    return globalThis.process.memoryUsage().heapUsed
+  return undefined
+}
+
+export function tryGC(): boolean {
+  if (typeof globalThis.gc === "function") { globalThis.gc(); return true }
+  if (typeof (globalThis as any).Bun?.gc === "function") { (globalThis as any).Bun.gc(true); return true }
+  return false
+}
+
 export function formatResult(r: BenchResult, json: boolean): string {
   if (json) return JSON.stringify(r)
 

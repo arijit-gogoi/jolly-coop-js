@@ -1,4 +1,4 @@
-import { run, formatResult, type BenchResult } from "./harness.js"
+import { run, formatResult, type BenchResult, getHeapUsed, tryGC } from "./harness.js"
 import { scope, sleep, yieldNow } from "../src/index.js"
 import { monitorLag, percentile } from "./harness.js"
 
@@ -133,6 +133,41 @@ async function main() {
       return { name: `io-sim-${limit}-of-${total}`, ops: total, duration_ms: d, ops_per_sec: Math.round(total / (d / 1000)), event_loop_lag_ms: maxLag }
     })
     log(formatResult(r, false))
+  }
+
+  // === Memory Stability ===
+  log("\nMemory Stability\n" + "─".repeat(40))
+
+  const heap0 = getHeapUsed()
+  if (heap0 === undefined) {
+    log("  (skipped — no memory API in this environment)")
+  } else {
+    const gcAvailable = tryGC()
+    if (!gcAvailable) log("  (no GC API — run with --expose-gc for accurate results)")
+    const mr = await bench("memory-stability", async () => {
+      const heaps: number[] = []
+      for (let i = 0; i < 20; i++) {
+        await scope(async s => {
+          for (let j = 0; j < 10_000; j++)
+            s.spawn(() => {})
+        })
+        tryGC()
+        heaps.push(getHeapUsed()!)
+      }
+      const first5 = heaps.slice(0, 5).reduce((a, b) => a + b, 0) / 5
+      const last5 = heaps.slice(-5).reduce((a, b) => a + b, 0) / 5
+      const leaking = last5 > first5 * 1.1
+      return {
+        name: "memory-stability",
+        duration_ms: 0,
+        details: { heaps, first5_avg: first5, last5_avg: last5, leaking, gcForced: gcAvailable }
+      }
+    })
+    log(formatResult(mr, false))
+    const d = mr.details as { leaking: boolean; gcForced: boolean }
+    if (d.leaking && !d.gcForced) log("    heap growth likely due to missing GC — not a real leak")
+    else if (d.leaking) log("    WARNING: heap trending upward — possible leak")
+    else log("    heap stable")
   }
 
   // === Summary ===

@@ -22,7 +22,7 @@ Jolly is a structured concurrency runtime for JS (Node, Bun, Deno, browser). Sco
 
 ## Commands
 - `npm test` — unit tests (130 tests, all must pass)
-- `npm run bench` — benchmarks (19 benchmarks via tsx)
+- `npm run bench` — benchmarks (20 benchmarks via tsx)
 
 ## Commit & Documentation Discipline
 - The git log IS the optimization history. Write well-structured commits: what changed, why, and before/after numbers for perf changes.

@@ -235,18 +235,25 @@ await Promise.all(
 
 Memory benchmarks verify that the runtime does not leak task objects, scope state, or scheduler entries across repeated scope lifecycles.
 
+Memory and GC APIs differ across runtimes. The benchmark harness provides a cross-runtime adapter (see section 4.4) that abstracts these differences. In environments without memory APIs (browsers), the memory benchmark is skipped gracefully.
+
 **Test — Repeated scope stress.** Run a heavy workload inside a scope, force garbage collection, and record heap usage. Repeat 20 times. The heap usage series should be flat — no upward trend.
 
 ```javascript
-for (let i = 0; i < 20; i++) {
-  await scope(async s => {
-    for (let j = 0; j < 10_000; j++) {
-      s.spawn(() => {})
-    }
-  })
+const heap0 = getHeapUsed()
+if (heap0 === undefined) {
+  log("  (skipped — no memory API in this environment)")
+} else {
+  for (let i = 0; i < 20; i++) {
+    await scope(async s => {
+      for (let j = 0; j < 10_000; j++) {
+        s.spawn(() => {})
+      }
+    })
 
-  global.gc?.()
-  console.log(process.memoryUsage().heapUsed)
+    tryGC()
+    console.log(getHeapUsed())
+  }
 }
 ```
 
@@ -322,6 +329,38 @@ Every benchmark emits a structured JSON result that includes all relevant metric
 
 This format enables automated comparison across runs, environments, and versions. Not every field applies to every benchmark — latency benchmarks won't report `ops_per_sec`, and throughput benchmarks won't report latency percentiles — but the schema is consistent.
 
+### 4.4 Runtime Memory Adapter
+
+Memory and GC APIs vary across runtimes. The harness provides two adapter functions that detect the runtime and call the appropriate API:
+
+```typescript
+export function getHeapUsed(): number | undefined {
+  // Deno first — it polyfills `process` in some compat modes
+  if (typeof globalThis.Deno?.memoryUsage === "function")
+    return globalThis.Deno.memoryUsage().heapUsed
+  // Node / Bun (Bun provides process.memoryUsage compat)
+  if (typeof globalThis.process?.memoryUsage === "function")
+    return globalThis.process.memoryUsage().heapUsed
+  return undefined  // browser or unknown — skip memory benchmark
+}
+
+export function tryGC(): void {
+  // Node --expose-gc / Bun --expose-gc
+  if (typeof globalThis.gc === "function") { globalThis.gc(); return }
+  // Bun native
+  if (typeof globalThis.Bun?.gc === "function") { globalThis.Bun.gc(true); return }
+  // Deno: no public GC API — measurements will be noisier
+}
+```
+
+Design rationale:
+- **Deno checked before Node** because Deno polyfills `process` in some compat contexts. Checking `Deno.memoryUsage` first avoids hitting the polyfill.
+- **Bun's native `Bun.gc(true)`** is preferred over requiring `--expose-gc` when available.
+- **Returns `undefined` in browsers** and unknown runtimes, allowing benchmarks to skip gracefully rather than crash.
+- **Deno cannot force GC** — heap measurements will be noisier there, but a sustained upward trend still indicates a leak.
+
+These adapters live in the benchmark harness (`bench/harness.ts`), not in the library. The library itself remains platform-independent with zero runtime detection.
+
 ---
 
 ## 5. Benchmark Scale Matrix
@@ -359,6 +398,11 @@ The benchmark suite should run across all Jolly v1 target environments:
 
 Cross-environment benchmarking validates the portability claims in the specification and reveals environment-specific performance characteristics (e.g., `MessageChannel` performance differences between V8 and JavaScriptCore).
 
+**Memory benchmark availability by runtime:**
+- **Node/Bun:** Full support. `--expose-gc` recommended for accurate GC forcing; without it, `tryGC()` is a no-op and heap measurements are noisier.
+- **Deno:** `Deno.memoryUsage()` available by default. No public GC API — measurements will be noisier but a sustained upward trend still indicates a leak.
+- **Browser:** Memory benchmark skipped (no reliable heap API). All other benchmarks run normally.
+
 ---
 
 ## 8. Benchmark Project Structure
@@ -367,26 +411,19 @@ The benchmark suite should be organized as a standalone directory within the Jol
 
 ```
 bench/
-  throughput.ts
-  latency.ts
-  event-loop-lag.ts
-  fairness.ts
-  limits.ts
-  memory.ts
-  io-simulation.ts
-  harness.ts
-  index.ts
+  harness.ts    — shared runner, timing, result formatting, cross-runtime memory adapter
+  index.ts      — orchestrates all benchmarks, per-benchmark progress output, CLI handling
 ```
 
-Each file contains the benchmarks for one category. `harness.ts` provides the shared runner, timing utilities, and result formatting. `index.ts` orchestrates all benchmarks and handles CLI output.
+All benchmarks are defined inline in `index.ts`. The harness provides `run()`, `percentile()`, `monitorLag()`, `formatResult()`, `getHeapUsed()`, and `tryGC()`.
 
 Benchmarks should be runnable with:
 
 ```bash
-node --expose-gc bench/index.js
+tsx bench/index.ts
 ```
 
-The `--expose-gc` flag is required for memory benchmarks that need to force garbage collection between iterations.
+The `--expose-gc` flag is optional and improves accuracy of the memory stability benchmark by enabling `globalThis.gc()`. Without it, the memory benchmark still runs but GC timing is less precise. On Bun, `Bun.gc(true)` is used automatically without any flag.
 
 ---
 
@@ -397,8 +434,8 @@ Benchmarks should be integrated into the project's CI pipeline for regression de
 ```json
 {
   "scripts": {
-    "bench": "node --expose-gc bench/index.js",
-    "bench:ci": "node --expose-gc bench/index.js --json"
+    "bench": "tsx bench/index.ts",
+    "bench:ci": "tsx bench/index.ts --json"
   }
 }
 ```

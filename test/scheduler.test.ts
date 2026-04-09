@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { scope, sleep, yieldNow } from "../src/index.js"
+import { scope, sleep, yieldNow, _resetScheduler } from "../src/index.js"
 
 test("multiple yields interleave tasks", async () => {
   const order: number[] = []
@@ -115,4 +115,48 @@ test("scheduler stable under many yields", async () => {
     }
   })
   expect(count).toBe(100)
+})
+
+// --- _resetScheduler tests ---
+
+test("_resetScheduler clears scheduler state", async () => {
+  // Run some work, reset, then verify new work runs cleanly
+  await scope(async s => {
+    s.spawn(() => {})
+  })
+  _resetScheduler()
+  let ran = false
+  await scope(async s => {
+    s.spawn(() => { ran = true })
+  })
+  expect(ran).toBe(true)
+})
+
+test("_resetScheduler allows clean signal context", async () => {
+  // After reset, nested scopes should work without stale signal
+  _resetScheduler()
+  const result = await scope(async s => {
+    const t = s.spawn(async () => 42)
+    return await t
+  })
+  expect(result).toBe(42)
+})
+
+test("scheduler handles work after large burst", async () => {
+  // Large burst triggers ring buffer growth; after completion + shrink,
+  // new work should still execute correctly
+  let count = 0
+  await scope(async s => {
+    for (let i = 0; i < 10000; i++) {
+      s.spawn(() => { count++ })
+    }
+  })
+  expect(count).toBe(10000)
+
+  // Now spawn a small batch — scheduler should still work after shrink
+  let ran = false
+  await scope(async s => {
+    s.spawn(() => { ran = true })
+  })
+  expect(ran).toBe(true)
 })

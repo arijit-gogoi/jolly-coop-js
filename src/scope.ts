@@ -5,11 +5,12 @@ import { schedule, runWithSignal, getCurrentSignal } from "./scheduler.js"
 
 class ScopeImpl {
   private abortController = new AbortController()
-  private tasks = new Set<TaskImpl<unknown>>()
+  private taskCount = 0
+  private incompleteTasks = false
   private pendingCount = 0
   private resources: Array<{ value: unknown; disposer: (value: any) => Promise<void> | void }> = []
   private cancelled = false
-  private firstError: unknown = null
+  private firstError: unknown = undefined
   private hasError = false
   private _doneGracefully = false
   private settled = false
@@ -25,6 +26,21 @@ class ScopeImpl {
   private timeoutTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(private readonly options: ScopeOptions) {
+    if (options.limit !== undefined) {
+      if (!Number.isFinite(options.limit) || options.limit <= 0 || !Number.isInteger(options.limit)) {
+        throw new TypeError("limit must be a positive integer")
+      }
+    }
+    if (options.timeout !== undefined) {
+      if (!Number.isFinite(options.timeout) || options.timeout < 0) {
+        throw new TypeError("timeout must be a non-negative finite number")
+      }
+    }
+    if (options.deadline !== undefined) {
+      if (!Number.isFinite(options.deadline)) {
+        throw new TypeError("deadline must be a finite number")
+      }
+    }
     this.limit = options.limit
     this.allTasksSettled = new Promise<void>(resolve => {
       this._resolveAllTasks = resolve
@@ -39,15 +55,20 @@ class ScopeImpl {
     return this.pendingCount
   }
 
+  private get cancelReason(): unknown {
+    return this.abortController.signal.reason ?? new Error("Scope cancelled")
+  }
+
   spawn<T>(fn: () => Promise<T> | T): Task<T> {
     const task = new TaskImpl<T>(fn)
     task._scope = this
-    this.tasks.add(task as TaskImpl<unknown>)
+    this.taskCount++
     this.pendingCount++
 
     if (this.cancelled) {
       task.transition("cancelled")
-      task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+      task.reject(this.cancelReason)
+      this.incompleteTasks = true
       this.taskDone()
       return task as unknown as Task<T>
     }
@@ -72,7 +93,8 @@ class ScopeImpl {
     // If scope was cancelled before this task runs
     if (this.cancelled && task.internalState === "created") {
       task.transition("cancelled")
-      task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+      task.reject(this.cancelReason)
+      this.incompleteTasks = true
       if (this.limit !== undefined) {
         this.runningCount--
         this.dequeueNext()
@@ -89,7 +111,7 @@ class ScopeImpl {
     } catch (err) {
       // Synchronous throw
       this.handleTaskError(task, err)
-      this.handleTaskFinally(task)
+      this.handleTaskFinally()
       return
     }
 
@@ -99,11 +121,11 @@ class ScopeImpl {
       ;(result as Promise<unknown>).then(
         value => this.handleTaskSuccess(task, value),
         err => this.handleTaskError(task, err)
-      ).then(() => this.handleTaskFinally(task))
+      ).then(() => this.handleTaskFinally())
     } else {
       // Sync fast path — no await overhead
       this.handleTaskSuccess(task, result)
-      this.handleTaskFinally(task)
+      this.handleTaskFinally()
     }
   }
 
@@ -111,7 +133,8 @@ class ScopeImpl {
     if (task.internalState !== "running") return
     if (this.cancelled) {
       task.transition("cancelled")
-      task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+      task.reject(this.cancelReason)
+      this.incompleteTasks = true
     } else {
       task.transition("completed")
       task.resolve(value)
@@ -122,10 +145,12 @@ class ScopeImpl {
     if (task.internalState !== "running") return
     if (this.cancelled) {
       task.transition("cancelled")
-      task.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+      task.reject(this.cancelReason)
+      this.incompleteTasks = true
     } else {
       task.transition("failed")
       task.reject(err)
+      this.incompleteTasks = true
       // Defer scope cancellation — only cancel if error wasn't observed
       Promise.resolve().then(() => {
         if (!task.observed) {
@@ -139,7 +164,7 @@ class ScopeImpl {
     }
   }
 
-  private handleTaskFinally(_task: TaskImpl<unknown>): void {
+  private handleTaskFinally(): void {
     if (this.limit !== undefined) {
       this.runningCount--
       this.dequeueNext()
@@ -152,7 +177,8 @@ class ScopeImpl {
       const next = this.limitQueue.shift()!
       if (this.cancelled && next.internalState === "created") {
         next.transition("cancelled")
-        next.reject(this.abortController.signal.reason ?? new Error("Scope cancelled"))
+        next.reject(this.cancelReason)
+        this.incompleteTasks = true
         this.taskDone()
         continue
       }
@@ -181,7 +207,8 @@ class ScopeImpl {
       const task = this.limitQueue.shift()!
       if (task.internalState === "created") {
         task.transition("cancelled")
-        task.reject(this.abortController.signal.reason)
+        task.reject(this.cancelReason)
+        this.incompleteTasks = true
         this.taskDone()
       }
     }
@@ -240,18 +267,16 @@ class ScopeImpl {
       }, timeout)
     }
 
-    const proxy: Scope = {
+    const proxy = {
       spawn: <U>(fn: () => Promise<U> | U) => this.spawn(fn),
       resource: <U>(value: Promise<U> | U, disposer: (value: U) => Promise<void> | void) =>
         this.resource(value, disposer),
       cancel: (reason?: unknown) => this.cancel(reason),
       done: () => this.done(),
-      get signal() { return this.signal },
-      get active() { return 0 },
-    }
+    } as Scope
 
-    Object.defineProperty(proxy, "signal", { get: () => this.signal })
-    Object.defineProperty(proxy, "active", { get: () => this.active })
+    Object.defineProperty(proxy, "signal", { get: () => this.signal, enumerable: true })
+    Object.defineProperty(proxy, "active", { get: () => this.active, enumerable: true })
 
     let rootResult: T | undefined
 
@@ -290,12 +315,8 @@ class ScopeImpl {
     }
     if (this.cancelled && !this._doneGracefully) {
       // If every spawned task reached "completed", cancel had no effect — resolve normally
-      let allCompleted = this.tasks.size > 0
-      for (const t of this.tasks) {
-        if (t.internalState !== "completed") { allCompleted = false; break }
-      }
-      if (!allCompleted) {
-        throw this.abortController.signal.reason ?? new Error("Scope cancelled")
+      if (this.taskCount === 0 || this.incompleteTasks) {
+        throw this.cancelReason
       }
     }
     return rootResult as T

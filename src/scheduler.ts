@@ -38,6 +38,14 @@ let scheduled = false
 
 // Platform-adaptive trigger: MessageChannel primary, setTimeout fallback
 // idle() nulls the onmessage handler so the port doesn't keep the event loop alive
+function shrinkIfNeeded() {
+  if (_buf.length > INITIAL_BUFFER) {
+    _buf = new Array(INITIAL_BUFFER)
+    _head = 0
+    _tail = 0
+  }
+}
+
 const { trigger, idle } = (() => {
   if (typeof MessageChannel !== "undefined") {
     const channel = new MessageChannel()
@@ -49,12 +57,13 @@ const { trigger, idle } = (() => {
       idle: () => {
         channel.port1.onmessage = null
         scheduled = false
+        shrinkIfNeeded()
       },
     }
   }
   return {
     trigger: () => setTimeout(drain, 0),
-    idle: () => {},
+    idle: () => { shrinkIfNeeded() },
   }
 })()
 
@@ -107,4 +116,13 @@ export function runWithSignal<T>(signal: AbortSignal, fn: () => T): T {
 
 export function getCurrentSignal(): AbortSignal | null {
   return _currentSignal
+}
+
+export function _resetScheduler(): void {
+  _buf = new Array(INITIAL_BUFFER)
+  _head = 0
+  _tail = 0
+  _size = 0
+  scheduled = false
+  _currentSignal = null
 }

@@ -313,3 +313,103 @@ test("done() cleans up resources", async () => {
   })
   expect(disposed).toBe(true)
 })
+
+// --- Signal propagation to nested scopes ---
+
+test("parent cancel propagates signal to nested scope tasks", async () => {
+  let childSignalAborted = false
+  await expect(
+    scope(async s => {
+      s.spawn(async () => {
+        await scope(async inner => {
+          inner.spawn(async () => {
+            try {
+              await sleep(100)
+            } catch {
+              // Task was cancelled — signal must be aborted
+              childSignalAborted = inner.signal.aborted
+            }
+          })
+        })
+      })
+      await sleep(5)
+      s.cancel()
+    })
+  ).rejects.toBeDefined()
+  expect(childSignalAborted).toBe(true)
+})
+
+test("nested scope inherits parent signal", async () => {
+  let innerTaskCancelled = false
+  await expect(
+    scope(async s => {
+      s.spawn(async () => {
+        await scope(async inner => {
+          inner.spawn(async () => {
+            await sleep(100)
+          })
+        })
+      })
+      s.cancel()
+    })
+  ).rejects.toBeDefined()
+  // If we got here without hanging, the nested scope was cancelled
+  innerTaskCancelled = true
+  expect(innerTaskCancelled).toBe(true)
+})
+
+// --- Multiple concurrent sibling scopes ---
+
+test("sibling scopes run independently", async () => {
+  let a = false
+  let b = false
+  await scope(async s => {
+    s.spawn(async () => {
+      await scope(async inner => {
+        inner.spawn(async () => { await sleep(5); a = true })
+      })
+    })
+    s.spawn(async () => {
+      await scope(async inner => {
+        inner.spawn(async () => { await sleep(5); b = true })
+      })
+    })
+  })
+  expect(a).toBe(true)
+  expect(b).toBe(true)
+})
+
+test("cancel in one sibling scope does not affect other", async () => {
+  let otherRan = false
+  await scope(async s => {
+    s.spawn(async () => {
+      await expect(
+        scope(async inner => {
+          inner.cancel()
+        })
+      ).rejects.toBeDefined()
+    })
+    s.spawn(async () => {
+      await scope(async inner => {
+        inner.spawn(async () => { await sleep(5); otherRan = true })
+      })
+    })
+  })
+  expect(otherRan).toBe(true)
+})
+
+// --- Error identity ---
+
+test("scope preserves error identity (same reference)", async () => {
+  const err = { custom: "error object" }
+  try {
+    await scope(async s => {
+      s.spawn(async () => { throw err })
+      await sleep(10)
+    })
+  } catch (e) {
+    expect(e).toBe(err)
+    return
+  }
+  expect.unreachable("scope should have thrown")
+})

@@ -184,3 +184,36 @@ test("task completion reduces active count", async () => {
     expect(s.active).toBe(0)
   })
 })
+
+// --- Additional task lifecycle tests ---
+
+test("task.state maps created to running before execution", async () => {
+  await scope(async s => {
+    const t = s.spawn(async () => {
+      await sleep(10)
+      return 1
+    })
+    // Task is created internally but public state shows "running"
+    expect(t.state).toBe("running")
+    await t
+  })
+})
+
+test("multiple errors: scope throws first error", async () => {
+  const err1 = new Error("first")
+  const err2 = new Error("second")
+  try {
+    await scope(async s => {
+      s.spawn(async () => { throw err1 })
+      s.spawn(async () => {
+        await sleep(5)
+        throw err2
+      })
+      await sleep(20)
+    })
+  } catch (e) {
+    expect(e).toBe(err1)
+    return
+  }
+  expect.unreachable("scope should have thrown")
+})

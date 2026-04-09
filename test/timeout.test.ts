@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { scope, sleep } from "../src/index.js"
+import { scope, sleep, TimeoutError } from "../src/index.js"
 
 test("timeout cancels multiple tasks", async () => {
   let ran = 0
@@ -93,4 +93,43 @@ test("manual cancel vs timeout race", async () => {
       s.cancel()
     })
   ).rejects.toBeDefined()
+})
+
+// --- Timeout/deadline edge cases ---
+
+test("timeout: 0 causes immediate timeout", async () => {
+  await expect(
+    scope({ timeout: 0 }, async s => {
+      s.spawn(async () => {
+        await sleep(50)
+      })
+    })
+  ).rejects.toThrow(TimeoutError)
+})
+
+test("deadline in the past causes immediate timeout", async () => {
+  await expect(
+    scope({ deadline: Date.now() - 1000 }, async s => {
+      s.spawn(async () => {
+        await sleep(50)
+      })
+    })
+  ).rejects.toThrow(TimeoutError)
+})
+
+test("parent timeout cancels nested child scope", async () => {
+  let childRan = false
+  await expect(
+    scope({ timeout: 10 }, async s => {
+      s.spawn(async () => {
+        await scope(async inner => {
+          inner.spawn(async () => {
+            await sleep(100)
+            childRan = true
+          })
+        })
+      })
+    })
+  ).rejects.toThrow(TimeoutError)
+  expect(childRan).toBe(false)
 })

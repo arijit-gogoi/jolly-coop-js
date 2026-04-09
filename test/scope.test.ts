@@ -236,3 +236,66 @@ test("deadline: NaN throws TypeError", () => {
 test("deadline: Infinity throws TypeError", () => {
   expect(() => scope({ deadline: Infinity }, async () => {})).toThrow(TypeError)
 })
+
+// --- External signal (options.signal) ---
+
+test("external signal cancels scope", async () => {
+  const ac = new AbortController()
+  const p = scope({ signal: ac.signal }, async s => {
+    s.spawn(async () => { await sleep(100) })
+  })
+  await sleep(5)
+  ac.abort(new Error("external abort"))
+  await expect(p).rejects.toBeDefined()
+})
+
+test("already-aborted signal cancels scope immediately", async () => {
+  const ac = new AbortController()
+  ac.abort(new Error("pre-aborted"))
+  let ran = false
+  await expect(
+    scope({ signal: ac.signal }, async s => {
+      s.spawn(async () => { ran = true })
+    })
+  ).rejects.toBeDefined()
+  expect(ran).toBe(false)
+})
+
+test("external signal reason propagates", async () => {
+  const ac = new AbortController()
+  const reason = new Error("custom reason")
+  const p = scope({ signal: ac.signal }, async s => {
+    s.spawn(async () => { await sleep(100) })
+  })
+  await sleep(5)
+  ac.abort(reason)
+  try {
+    await p
+  } catch (e) {
+    expect(e).toBe(reason)
+    return
+  }
+  expect.unreachable("scope should have thrown")
+})
+
+// --- Active count ---
+
+test("s.active tracks pending tasks", async () => {
+  const actives: number[] = []
+  await scope(async s => {
+    s.spawn(async () => { await sleep(5) })
+    s.spawn(async () => { await sleep(5) })
+    actives.push(s.active)
+  })
+  expect(actives[0]).toBe(2)
+})
+
+test("s.active includes queued tasks under limit", async () => {
+  let activeCount = 0
+  await scope({ limit: 1 }, async s => {
+    s.spawn(async () => { await sleep(5) })
+    s.spawn(async () => {})
+    activeCount = s.active
+  })
+  expect(activeCount).toBe(2)
+})

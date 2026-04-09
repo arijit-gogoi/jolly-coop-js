@@ -153,3 +153,41 @@ test("resource not leaked after scope exit", async () => {
   await sleep(5)
   expect(disposed).toBe(true)
 })
+
+// --- Resource error precedence ---
+
+test("task error wins over disposer error", async () => {
+  await expect(
+    scope(async s => {
+      await s.resource({}, () => { throw new Error("disposer fail") })
+      s.spawn(async () => { throw new Error("task fail") })
+      await sleep(10)
+    })
+  ).rejects.toThrow("task fail")
+})
+
+test("all disposers run even when earlier ones throw", async () => {
+  const ran: number[] = []
+  await scope(async s => {
+    await s.resource({}, () => { ran.push(1) })
+    await s.resource({}, () => { throw new Error("middle fail") })
+    await s.resource({}, () => { ran.push(3) })
+  })
+  // Resources dispose in reverse order: 3 runs, middle throws, 1 runs
+  expect(ran).toContain(1)
+  expect(ran).toContain(3)
+})
+
+test("resource cleanup completes before scope rejects", async () => {
+  let cleanedUp = false
+  await expect(
+    scope(async s => {
+      await s.resource({}, async () => {
+        await sleep(5)
+        cleanedUp = true
+      })
+      throw new Error("fail")
+    })
+  ).rejects.toThrow("fail")
+  expect(cleanedUp).toBe(true)
+})

@@ -197,3 +197,48 @@ test("limit works with yieldNow", async () => {
   })
   expect(max).toBeLessThanOrEqual(2)
 })
+
+// --- Limit edge cases ---
+
+test("cancel drains limit queue without running queued tasks", async () => {
+  const ran: number[] = []
+  await expect(
+    scope({ limit: 1 }, async s => {
+      s.spawn(async () => {
+        ran.push(1)
+        await sleep(20)
+      })
+      s.spawn(async () => { ran.push(2) })
+      s.spawn(async () => { ran.push(3) })
+      await sleep(5)
+      s.cancel()
+    })
+  ).rejects.toBeDefined()
+  expect(ran).toEqual([1])
+})
+
+test("slot freed by observed failed task allows queued task to run", async () => {
+  let secondRan = false
+  await scope({ limit: 1 }, async s => {
+    const t = s.spawn(async () => {
+      throw new Error("fail")
+    })
+    s.spawn(async () => {
+      secondRan = true
+    })
+    // Observe the error so it doesn't cancel the scope
+    await expect(t).rejects.toThrow("fail")
+  })
+  expect(secondRan).toBe(true)
+})
+
+test("active count reflects queued tasks", async () => {
+  let activeAfterSpawn = 0
+  await scope({ limit: 1 }, async s => {
+    s.spawn(async () => { await sleep(5) })
+    s.spawn(async () => {})
+    s.spawn(async () => {})
+    activeAfterSpawn = s.active
+  })
+  expect(activeAfterSpawn).toBe(3)
+})

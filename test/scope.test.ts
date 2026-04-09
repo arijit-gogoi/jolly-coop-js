@@ -194,3 +194,45 @@ test("no task leakage after scope exit", async () => {
   await sleep(10)
   expect(done).toBe(true)
 })
+
+// --- ScopeOptions validation ---
+
+test("limit: 0 throws TypeError", () => {
+  expect(() => scope({ limit: 0 }, async () => {})).toThrow(TypeError)
+})
+
+test("limit: -1 throws TypeError", () => {
+  expect(() => scope({ limit: -1 }, async () => {})).toThrow(TypeError)
+})
+
+test("limit: NaN throws TypeError", () => {
+  expect(() => scope({ limit: NaN }, async () => {})).toThrow(TypeError)
+})
+
+test("limit: 1.5 throws TypeError", () => {
+  expect(() => scope({ limit: 1.5 }, async () => {})).toThrow(TypeError)
+})
+
+test("limit: Infinity throws TypeError", () => {
+  expect(() => scope({ limit: Infinity }, async () => {})).toThrow(TypeError)
+})
+
+test("timeout: -1 throws TypeError", () => {
+  expect(() => scope({ timeout: -1 }, async () => {})).toThrow(TypeError)
+})
+
+test("timeout: NaN throws TypeError", () => {
+  expect(() => scope({ timeout: NaN }, async () => {})).toThrow(TypeError)
+})
+
+test("timeout: Infinity throws TypeError", () => {
+  expect(() => scope({ timeout: Infinity }, async () => {})).toThrow(TypeError)
+})
+
+test("deadline: NaN throws TypeError", () => {
+  expect(() => scope({ deadline: NaN }, async () => {})).toThrow(TypeError)
+})
+
+test("deadline: Infinity throws TypeError", () => {
+  expect(() => scope({ deadline: Infinity }, async () => {})).toThrow(TypeError)
+})

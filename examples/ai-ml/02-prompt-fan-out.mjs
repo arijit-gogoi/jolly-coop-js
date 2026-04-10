@@ -1,7 +1,7 @@
 // Moderate: Fan-out a document into chunk summaries, then synthesize
 // Shows: scope, spawn, sleep, yieldNow, limit, timeout
 //
-// Pattern: Split a document into chunks, summarize each chunk in parallel
+// Pattern: Split a document into chunks, summarize each chunk concurrently
 // with a concurrency limit (API rate limit), then combine summaries
 // into a final synthesis. Per-chunk timeout prevents slow API calls
 // from blocking the pipeline.

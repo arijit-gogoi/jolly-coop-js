@@ -1,4 +1,4 @@
-// Advanced: Full integration test harness with lifecycle hooks, parallel suites,
+// Advanced: Full integration test harness with lifecycle hooks, concurrent suites,
 // resource isolation, and failure reporting
 // Shows: scope, spawn, resource, cancel, sleep, yieldNow, signal, limit, timeout, nested scopes
 //

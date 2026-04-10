@@ -54,7 +54,7 @@ const elapsed = (performance.now() - start).toFixed(0)
 const totalKB = results.reduce((sum, r) => sum + r.sizeKB, 0)
 
 console.log(`\nDownloaded ${results.length} files (${totalKB}KB total) in ${elapsed}ms`)
-console.log(`Concurrency: 3 parallel downloads`)
+console.log(`Concurrency: 3 concurrent downloads`)
 
 console.assert(results.length === urls.length, `expected ${urls.length} downloads`)
 console.assert(completed === urls.length, "all downloads should complete")

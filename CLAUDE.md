@@ -22,10 +22,11 @@ Jolly is a structured concurrency runtime for JS (Node, Bun, Deno, browser). Sco
 - @jolly.md — source spec + API surface + test plan
 
 ## Commands
-- `npm test` — unit tests (170 tests, all must pass)
+- `npm test` — unit tests (181 tests, all must pass)
 - `npm run bench` — benchmarks (20 benchmarks via tsx)
 
 ## Commit & Documentation Discipline
+- Use Conventional Commits: `<type>(scope): description` (types: feat, fix, docs, style, refactor, test, chore).
 - The git log IS the optimization history. Write well-structured commits: what changed, why, and before/after numbers for perf changes.
 - Decision rationale (why X over Y) goes in code comments at the decision site, not standalone docs.
 - Spec files (`spec/`) cover architectural "why". Code comments cover implementation "why".

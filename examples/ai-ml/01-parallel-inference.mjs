@@ -1,4 +1,4 @@
-// Basic: Run multiple model inferences in parallel, pick the best
+// Basic: Run multiple model inferences concurrently, pick the best
 // Shows: scope, spawn, sleep
 //
 // Pattern: Send the same prompt to multiple models (or the same model
@@ -43,7 +43,7 @@ const results = await scope(async s => {
 const elapsed = (performance.now() - start).toFixed(0)
 const best = results.sort((a, b) => b.quality - a.quality)[0]
 
-console.log(`Ran ${results.length} inferences in ${elapsed}ms (parallel)`)
+console.log(`Ran ${results.length} inferences in ${elapsed}ms (concurrent)`)
 for (const r of results) {
   const marker = r === best ? " ← best" : ""
   console.log(`  ${r.model} t=${r.temperature}: quality=${r.quality} (${r.latency}ms)${marker}`)
@@ -51,6 +51,6 @@ for (const r of results) {
 
 console.assert(results.length === 5, "should have 5 results")
 console.assert(best.quality >= 0, "best should have quality score")
-console.assert(Number(elapsed) < 500, "parallel should be fast")
+console.assert(Number(elapsed) < 500, "concurrent should be fast")
 
 console.log("\n✓ parallel-inference passed")

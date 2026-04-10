@@ -1,4 +1,4 @@
-// Basic: Load multiple data sources for a dashboard in parallel
+// Basic: Load multiple data sources for a dashboard concurrently
 // Shows: scope, spawn, awaiting tasks
 //
 // Pattern: A dashboard needs user profile, notifications, and feed data.
@@ -28,7 +28,7 @@ const dashboard = await scope(async s => {
 
 const elapsed = (performance.now() - start).toFixed(0)
 
-console.log(`Dashboard loaded in ${elapsed}ms (parallel, not ${80 + 40 + 120}ms sequential)`)
+console.log(`Dashboard loaded in ${elapsed}ms (concurrent, not ${80 + 40 + 120}ms sequential)`)
 console.log(`  Profile: ${dashboard.profile.name}`)
 console.log(`  Notifications: ${dashboard.notifications.length}`)
 console.log(`  Feed items: ${dashboard.feed.length}`)
@@ -36,6 +36,6 @@ console.log(`  Feed items: ${dashboard.feed.length}`)
 console.assert(dashboard.profile.name === "Ada Lovelace", "profile wrong")
 console.assert(dashboard.notifications.length === 2, "notifications wrong")
 console.assert(dashboard.feed.length === 2, "feed wrong")
-console.assert(Number(elapsed) < 200, "should be parallel, not sequential")
+console.assert(Number(elapsed) < 200, "should be concurrent, not sequential")
 
 console.log("\n✓ dashboard-loader passed")

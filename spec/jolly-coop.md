@@ -575,7 +575,7 @@ These features may be considered for future versions but are out of scope for v1
 
 This section demonstrates idiomatic Jolly usage for common async patterns.
 
-### 18.1 Basic Parallel Tasks
+### 18.1 Basic Concurrent Tasks
 
 ```typescript
 import { scope } from "jolly"
@@ -591,9 +591,9 @@ await scope(async s => {
 })
 ```
 
-Both tasks run in parallel. The scope waits for both. If either fails, the other is cancelled and the scope rejects with the first error.
+Both tasks run concurrently. The scope waits for both. If either fails, the other is cancelled and the scope rejects with the first error.
 
-### 18.2 Sequential Within Parallel
+### 18.2 Sequential Within Concurrent
 
 ```typescript
 await scope(async s => {

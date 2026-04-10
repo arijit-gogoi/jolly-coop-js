@@ -67,7 +67,7 @@ async function DataTable(parentScope, items) {
   await scope({ timeout: 500 }, async s => {
     emit(`table: loading ${items.length} rows`)
 
-    // Spawn parallel row processors with concurrency limit
+    // Spawn concurrent row processors with concurrency limit
     await scope({ limit: 3 }, async batchScope => {
       for (const item of items) {
         batchScope.spawn(async () => {

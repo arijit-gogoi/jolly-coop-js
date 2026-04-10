@@ -1,8 +1,8 @@
-// Advanced: Parallel build system with dependency graph, resource cleanup, and cancellation
+// Advanced: Concurrent build system with dependency graph, resource cleanup, and cancellation
 // Shows: scope, spawn, resource, cancel, sleep, yieldNow, signal, limit, timeout, nested scopes
 //
 // Pattern: A CLI build tool that resolves dependencies, runs build steps
-// in parallel (respecting dependency order), manages temp files as
+// concurrently (respecting dependency order), manages temp files as
 // resources, and cancels everything on first failure.
 
 import { scope, sleep, yieldNow } from "../../dist/index.js"
@@ -41,7 +41,7 @@ async function build(moduleGraph, { concurrency = 4, failOnModule } = {}) {
     if (!mod) throw new Error(`Unknown module: ${name}`)
 
     const promise = scope(async modScope => {
-      // Wait for dependencies (in parallel within parent scope)
+      // Wait for dependencies (concurrently within parent scope)
       if (mod.deps.length > 0) {
         await scope(async depScope => {
           for (const dep of mod.deps) {
@@ -109,7 +109,7 @@ const taskIdx = result.built.indexOf("task")
 const schedIdx = result.built.indexOf("scheduler")
 console.assert(scopeIdx > taskIdx, "scope must build after task")
 console.assert(scopeIdx > schedIdx, "scope must build after scheduler")
-console.assert(result.elapsed < 500, "parallel build should be fast")
+console.assert(result.elapsed < 500, "concurrent build should be fast")
 
 // --- Run 2: failed build with cleanup ---
 
@@ -135,6 +135,6 @@ console.assert(buildError.message.includes("scope"), "error should mention scope
 console.log("\nAPI surface exercised:")
 console.log("  scope(), spawn(), resource(), sleep(), yieldNow()")
 console.log("  signal, limit, timeout, nested scopes")
-console.log("  dependency resolution, parallel build, resource cleanup on failure")
+console.log("  dependency resolution, concurrent build, resource cleanup on failure")
 
 console.log("\n✓ build-system passed")

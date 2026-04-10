@@ -1,4 +1,4 @@
-// Basic: Parallel test setup and teardown
+// Basic: Concurrent test setup and teardown
 // Shows: scope, spawn, sleep, resource
 //
 // Pattern: Test suites need setup (DB, cache, fixtures) before running.
@@ -33,7 +33,7 @@ async function seedFixtures(db) {
 const results = []
 
 await scope(async suite => {
-  // Parallel setup — all resources managed, auto-cleaned
+  // Concurrent setup — all resources managed, auto-cleaned
   const db = await suite.resource(createTestDB(), (db) => emit(`teardown: ${db.name} disconnected`))
   const cache = await suite.resource(createTestCache(), (c) => emit(`teardown: ${c.name} cleared`))
   const fixtures = await seedFixtures(db)

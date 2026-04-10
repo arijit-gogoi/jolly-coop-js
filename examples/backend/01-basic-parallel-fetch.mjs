@@ -1,4 +1,4 @@
-// Basic: Fetch multiple endpoints in parallel, collect results
+// Basic: Fetch multiple endpoints concurrently, collect results
 // Shows: scope, spawn, awaiting tasks
 
 import { scope } from "../../dist/index.js"
@@ -27,7 +27,7 @@ const results = await scope(async s => {
   return data
 })
 
-console.log(`Fetched ${results.length} resources in parallel`)
+console.log(`Fetched ${results.length} resources concurrently`)
 for (const r of results) {
   const label = r.title ? `Post: "${r.title.slice(0, 50)}"` : `User: ${r.name}`
   console.log(`  ${label}`)

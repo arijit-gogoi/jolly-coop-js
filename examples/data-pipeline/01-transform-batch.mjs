@@ -1,4 +1,4 @@
-// Basic: Transform a batch of records in parallel
+// Basic: Transform a batch of records concurrently
 // Shows: scope, spawn, sleep
 //
 // Pattern: ETL pipelines read records, transform them, and write results.

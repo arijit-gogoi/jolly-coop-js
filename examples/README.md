@@ -15,7 +15,7 @@ npm run examples -- 01-basic  # run a single example
 
 | Example | Description | Key features |
 |---------|-------------|--------------|
-| [01-basic-parallel-fetch](backend/01-basic-parallel-fetch.mjs) | Fetch multiple endpoints in parallel | `scope`, `spawn`, await tasks |
+| [01-basic-parallel-fetch](backend/01-basic-parallel-fetch.mjs) | Fetch multiple endpoints concurrently | `scope`, `spawn`, await tasks |
 | [02-rate-limited-pipeline](backend/02-rate-limited-pipeline.mjs) | Batch job with concurrency cap and timeout | `limit`, `timeout`, `sleep`, `yieldNow`, first-error-wins |
 | [03-full-api-server-simulation](backend/03-full-api-server-simulation.mjs) | Connection pool, cache, nested request scopes | `resource`, `cancel`, `signal`, nested scopes |
 
@@ -23,7 +23,7 @@ npm run examples -- 01-basic  # run a single example
 
 | Example | Description | Key features |
 |---------|-------------|--------------|
-| [01-dashboard-loader](frontend/01-dashboard-loader.mjs) | Load profile, notifications, feed in parallel | `scope`, `spawn`, parallel data loading |
+| [01-dashboard-loader](frontend/01-dashboard-loader.mjs) | Load profile, notifications, feed concurrently | `scope`, `spawn`, concurrent data loading |
 | [02-search-with-cancellation](frontend/02-search-with-cancellation.mjs) | Typeahead with debounce, cancel previous search | `cancel`, `sleep`, `signal` |
 | [03-component-lifecycle](frontend/03-component-lifecycle.mjs) | Components as scopes, navigation cancels everything | `resource`, `cancel`, `signal`, nested scopes |
 
@@ -41,7 +41,7 @@ npm run examples -- 01-basic  # run a single example
 |---------|-------------|--------------|
 | [01-parallel-file-hash](cli/01-parallel-file-hash.mjs) | Hash multiple files concurrently | `scope`, `spawn`, `sleep` |
 | [02-concurrent-downloader](cli/02-concurrent-downloader.mjs) | Download with concurrency cap and progress | `limit`, `sleep`, `yieldNow`, `signal` |
-| [03-build-system](cli/03-build-system.mjs) | Dependency graph, parallel builds, cleanup on failure | `resource`, `sleep`, `yieldNow`, `limit`, nested scopes |
+| [03-build-system](cli/03-build-system.mjs) | Dependency graph, concurrent builds, cleanup on failure | `resource`, `sleep`, `yieldNow`, `limit`, nested scopes |
 
 ## Game Development
 
@@ -55,7 +55,7 @@ npm run examples -- 01-basic  # run a single example
 
 | Example | Description | Key features |
 |---------|-------------|--------------|
-| [01-transform-batch](data-pipeline/01-transform-batch.mjs) | Transform records in parallel, maintain order | `scope`, `spawn`, `sleep` |
+| [01-transform-batch](data-pipeline/01-transform-batch.mjs) | Transform records concurrently, maintain order | `scope`, `spawn`, `sleep` |
 | [02-fan-out-fan-in](data-pipeline/02-fan-out-fan-in.mjs) | Extract/transform/load with backpressure | `limit`, `yieldNow`, nested scopes |
 | [03-streaming-etl](data-pipeline/03-streaming-etl.mjs) | Partitioned processing, dead-letter queue, checkpointing | `resource`, `timeout`, `limit`, `signal`, nested scopes |
 
@@ -71,9 +71,9 @@ npm run examples -- 01-basic  # run a single example
 
 | Example | Description | Key features |
 |---------|-------------|--------------|
-| [01-parallel-setup](testing/01-parallel-setup.mjs) | Parallel test setup with guaranteed teardown | `scope`, `spawn`, `resource` |
+| [01-parallel-setup](testing/01-parallel-setup.mjs) | Concurrent test setup with guaranteed teardown | `scope`, `spawn`, `resource` |
 | [02-timeout-and-retry](testing/02-timeout-and-retry.mjs) | Per-test timeout and flaky test retry | `timeout`, `cancel`, `sleep`, nested scopes |
-| [03-integration-harness](testing/03-integration-harness.mjs) | Full harness: lifecycle hooks, parallel suites, isolation | `resource`, `limit`, `timeout`, `yieldNow`, nested scopes |
+| [03-integration-harness](testing/03-integration-harness.mjs) | Full harness: lifecycle hooks, concurrent suites, isolation | `resource`, `limit`, `timeout`, `yieldNow`, nested scopes |
 
 ## Patterns
 

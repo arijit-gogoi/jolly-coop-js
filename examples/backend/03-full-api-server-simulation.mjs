@@ -54,7 +54,7 @@ async function handleRequest(s, req, pool, cache) {
     // Simulate DB query
     await conn.query(`SELECT * FROM ${req.type} WHERE userId = ${req.userId}`)
 
-    // For complex requests, fan out sub-queries in parallel
+    // For complex requests, fan out sub-queries concurrently
     if (req.type === "getUser") {
       const results = {}
       const profileTask = reqScope.spawn(async () => {

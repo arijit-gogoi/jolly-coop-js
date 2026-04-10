@@ -24,7 +24,7 @@ const results = await scope(async s => {
     return res.json()
   })
 
-  // Both run in parallel. If either fails, the other is cancelled.
+  // Both run concurrently. If either fails, the other is cancelled.
   // Resources are cleaned up. No leaked promises.
   return { profile: await profile, feed: await feed }
 })
@@ -75,7 +75,7 @@ Tasks implement `PromiseLike<T>` and can be awaited.
 
 Node 16+, Bun, Deno, browser. Zero dependencies. 12.4KB ESM bundle.
 
-All 170 tests pass on Node, Bun, and Deno.
+All 181 tests pass on Node, Bun, and Deno.
 
 ## Examples
 

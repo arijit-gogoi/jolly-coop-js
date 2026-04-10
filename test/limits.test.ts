@@ -16,7 +16,7 @@ test("limit=1 enforces sequential execution", async () => {
   expect(order).toEqual([1, 2, 3])
 })
 
-test("high limit allows parallel execution", async () => {
+test("high limit allows concurrent execution", async () => {
   let running = 0
   let max = 0
   await scope({ limit: 100 }, async s => {

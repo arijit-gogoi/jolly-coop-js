@@ -1,4 +1,4 @@
-// Basic: Hash multiple files in parallel
+// Basic: Hash multiple files concurrently
 // Shows: scope, spawn, sleep
 //
 // Pattern: CLI tools often process multiple files concurrently.
@@ -45,6 +45,6 @@ for (const { path, size, hash } of results) {
 
 console.assert(results.length === files.length, `expected ${files.length} results`)
 console.assert(results.every(r => r.hash.length === 8), "all hashes should be 8 chars")
-console.assert(Number(elapsed) < 500, "parallel should be fast")
+console.assert(Number(elapsed) < 500, "concurrent should be fast")
 
 console.log("\n✓ parallel-file-hash passed")

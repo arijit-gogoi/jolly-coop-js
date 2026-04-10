@@ -73,9 +73,9 @@ Tasks implement `PromiseLike<T>` and can be awaited.
 
 ## Platform support
 
-Node 16+, Bun, Deno, browser. Zero dependencies. 11.6KB ESM bundle.
+Node 16+, Bun, Deno, browser. Zero dependencies. 12.4KB ESM bundle.
 
-All 136 tests pass on Node, Bun, and Deno.
+All 170 tests pass on Node, Bun, and Deno.
 
 ## Examples
 

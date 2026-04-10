@@ -13,6 +13,7 @@ Jolly is a structured concurrency runtime for JS (Node, Bun, Deno, browser). Sco
 - Hybrid execution budget: MAX_TASKS=5000, MAX_TIME=5ms
 - Scheduler complexity budget: ~150-200 lines
 - Platform independent: no Node/Bun/Deno/browser-specific APIs
+- No per-task data structures: use incremental counters and flags, not Sets/Maps that grow with task count
 
 ## Key Docs
 - @jolly-coop.md — behavioral specification (task state machine, cancellation, cleanup)
@@ -21,7 +22,7 @@ Jolly is a structured concurrency runtime for JS (Node, Bun, Deno, browser). Sco
 - @jolly.md — source spec + API surface + test plan
 
 ## Commands
-- `npm test` — unit tests (130 tests, all must pass)
+- `npm test` — unit tests (170 tests, all must pass)
 - `npm run bench` — benchmarks (20 benchmarks via tsx)
 
 ## Commit & Documentation Discipline

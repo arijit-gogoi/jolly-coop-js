@@ -402,6 +402,8 @@ The following decisions are final for Jolly v1 and should not be revisited witho
 
 **Complexity budget:** The scheduler should be approximately 150–200 lines of code. If it grows significantly beyond this, the design is too complex for v1.
 
+**No per-task data structures:** The runtime must not maintain collections (Sets, Maps, Arrays) that grow with task count for bookkeeping purposes. Use incremental counters and boolean flags instead. A `Set<Task>` tracking all spawned tasks costs O(n) hash operations at spawn time — at 100k tasks, this dominates the hot path. Compute answers incrementally as events occur (e.g. set `incompleteTasks = true` when a task fails) rather than storing data to reconstruct them later.
+
 These decisions produce a scheduler that is simple, portable, predictable, and debuggable — the correct foundation for a structured concurrency runtime.
 
 ---

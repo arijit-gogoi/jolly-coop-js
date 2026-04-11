@@ -80,7 +80,7 @@ function drain() {
     if (typeof entry === "function") entry()
     else entry._run()
 
-    if (++count >= MAX_TASKS || performance.now() - start > MAX_TIME) {
+    if (++count >= MAX_TASKS || (count & 31) === 0 && performance.now() - start > MAX_TIME) {
       if (_size > 0) {
         scheduleNextTick()
       } else {

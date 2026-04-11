@@ -23,13 +23,15 @@
     "test:watch": "vitest",
     "examples": "npm run build && node examples/run.mjs",
     "bench": "tsx --expose-gc bench/index.ts",
+    "bench:vi": "vitest bench",
     "bench:ci": "tsx --expose-gc bench/index.ts --json",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.4",
     "tsup": "^8.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.4.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.4"
   }
 }

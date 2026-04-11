@@ -5,8 +5,9 @@ const INITIAL_BUFFER = 131072 // pre-allocate for 100k+ workloads without resize
 // Schedulable: plain callback or object with _run() — avoids per-task closure allocation
 type Schedulable = (() => void) | { _run(): void }
 
-// Ring buffer queue — O(1) push and shift
+// Ring buffer queue — O(1) push and shift, power-of-2 sizes for bitwise wrap
 let _buf: (Schedulable | undefined)[] = new Array(INITIAL_BUFFER)
+let _mask = INITIAL_BUFFER - 1
 let _head = 0
 let _tail = 0
 let _size = 0
@@ -15,13 +16,14 @@ function qPush(entry: Schedulable) {
   if (_size === _buf.length) {
     const len = _buf.length
     const next = new Array(len * 2) as (Schedulable | undefined)[]
-    for (let i = 0; i < _size; i++) next[i] = _buf[(_head + i) % len]
+    for (let i = 0; i < _size; i++) next[i] = _buf[(_head + i) & _mask]
     _buf = next
+    _mask = next.length - 1
     _head = 0
     _tail = _size
   }
   _buf[_tail] = entry
-  _tail = (_tail + 1) % _buf.length
+  _tail = (_tail + 1) & _mask
   _size++
 }
 
@@ -29,7 +31,7 @@ function qShift(): Schedulable | undefined {
   if (_size === 0) return undefined
   const entry = _buf[_head]
   _buf[_head] = undefined
-  _head = (_head + 1) % _buf.length
+  _head = (_head + 1) & _mask
   _size--
   return entry
 }
@@ -41,6 +43,7 @@ let scheduled = false
 function shrinkIfNeeded() {
   if (_buf.length > INITIAL_BUFFER) {
     _buf = new Array(INITIAL_BUFFER)
+    _mask = INITIAL_BUFFER - 1
     _head = 0
     _tail = 0
   }
@@ -120,6 +123,7 @@ export function getCurrentSignal(): AbortSignal | null {
 
 export function _resetScheduler(): void {
   _buf = new Array(INITIAL_BUFFER)
+  _mask = INITIAL_BUFFER - 1
   _head = 0
   _tail = 0
   _size = 0

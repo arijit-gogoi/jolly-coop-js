@@ -1,6 +1,6 @@
 import { run, formatResult, type BenchResult, getHeapUsed, tryGC } from "./harness.js"
 import { scope, sleep, yieldNow } from "../src/index.js"
-import { monitorLag, percentile } from "./harness.js"
+import { monitorLag } from "./harness.js"
 
 const jsonMode = process.argv.includes("--json")
 const allResults: BenchResult[] = []
@@ -18,50 +18,8 @@ async function bench(name: string, fn: () => Promise<BenchResult | void>) {
 }
 
 async function main() {
-  // === Throughput ===
-  log("\nThroughput\n" + "─".repeat(40))
-
-  for (const N of [1_000, 10_000, 100_000]) {
-    const r = await bench(`throughput-noop-${N}`, async () => {
-      const start = performance.now()
-      await scope(async s => { for (let i = 0; i < N; i++) s.spawn(() => {}) })
-      const d = performance.now() - start
-      return { name: `throughput-noop-${N}`, ops: N, duration_ms: d, ops_per_sec: Math.round(N / (d / 1000)) }
-    })
-    log(formatResult(r, false))
-
-    const r2 = await bench(`throughput-yield-${N}`, async () => {
-      const start = performance.now()
-      await scope(async s => { for (let i = 0; i < N; i++) s.spawn(async () => { await yieldNow() }) })
-      const d = performance.now() - start
-      return { name: `throughput-yield-${N}`, ops: N, duration_ms: d, ops_per_sec: Math.round(N / (d / 1000)) }
-    })
-    log(formatResult(r2, false))
-  }
-
-  // === Scheduling Latency ===
-  log("\nScheduling Latency\n" + "─".repeat(40))
-
-  for (const N of [1_000, 10_000, 100_000]) {
-    const r = await bench(`latency-scheduling-${N}`, async () => {
-      const latencies: number[] = []
-      await scope(async s => {
-        for (let i = 0; i < N; i++) {
-          const t0 = performance.now()
-          s.spawn(() => { latencies.push(performance.now() - t0) })
-        }
-      })
-      latencies.sort((a, b) => a - b)
-      return {
-        name: `latency-scheduling-${N}`, ops: N,
-        duration_ms: latencies.reduce((a, b) => a + b, 0),
-        p50_latency_ms: percentile(latencies, 50),
-        p95_latency_ms: percentile(latencies, 95),
-        p99_latency_ms: percentile(latencies, 99),
-      }
-    })
-    log(formatResult(r, false))
-  }
+  // Throughput and latency microbenchmarks moved to vitest bench (npm run bench:vi)
+  // This harness covers behavioral benchmarks that require custom instrumentation.
 
   // === Event Loop Lag ===
   log("\nEvent Loop Lag\n" + "─".repeat(40))

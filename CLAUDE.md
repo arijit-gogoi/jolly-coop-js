@@ -23,7 +23,7 @@ Jolly is a structured concurrency runtime for JS (Node, Bun, Deno, browser). Sco
 
 ## Commands
 - `npm test` — unit tests (181 tests, all must pass)
-- `npm run bench` — behavioral benchmarks (20 benchmarks via tsx: event loop lag, fairness, limits, memory)
+- `npm run bench` — behavioral benchmarks (11 via tsx: event loop lag, fairness, limits, I/O sim, memory)
 - `npm run bench:vi` — microbenchmarks (9 benchmarks via vitest bench: throughput, latency with statistical analysis)
 
 ## Commit & Documentation Discipline

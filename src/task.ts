@@ -29,8 +29,6 @@ export class TaskImpl<T> {
       this._resolve = resolve
       this._reject = reject
     })
-    // Suppress unhandled rejection — errors are managed by the scope
-    this.promise.catch(noop)
   }
 
   get observed(): boolean {
@@ -58,6 +56,7 @@ export class TaskImpl<T> {
   }
 
   reject(reason: unknown): void {
+    this.promise.catch(noop) // suppress unhandled rejection — errors managed by scope
     this._reject(reason)
   }
 

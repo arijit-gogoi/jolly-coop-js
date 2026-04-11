@@ -36,7 +36,7 @@ export function yieldNow(): Promise<void> {
       if (signal) {
         // Signal-aware: defer by one microtask so peer immediate-resolves
         // (e.g. root-fn resume → cancel) fire their continuations first
-        Promise.resolve().then(() => {
+        queueMicrotask(() => {
           if (signal.aborted) {
             reject(signal.reason)
           } else {

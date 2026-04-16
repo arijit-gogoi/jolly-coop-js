@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/arijit-gogoi/jolly-coop-js.git"
+    "url": "git+https://github.com/arijit-gogoi/jolly-coop-js.git"
   },
   "homepage": "https://github.com/arijit-gogoi/jolly-coop-js",
   "bugs": "https://github.com/arijit-gogoi/jolly-coop-js/issues",

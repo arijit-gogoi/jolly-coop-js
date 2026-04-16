@@ -109,6 +109,10 @@ npm run examples -- backend   # run one category
 npm run examples -- pipeline  # filter by keyword
 ```
 
+## Specification
+
+The full behavioral specification — execution semantics, task state machine, error model, cancellation, and compliance requirements — is in [spec/jolly-coop.md](spec/jolly-coop.md).
+
 ## Status
 
 Pre-1.0. The API may change.

@@ -1,6 +1,6 @@
 {
   "name": "jolly-coop",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Structured concurrency runtime for JavaScript",
   "author": "Arijit Gogoi",
   "license": "MIT",

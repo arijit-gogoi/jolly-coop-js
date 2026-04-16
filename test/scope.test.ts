@@ -195,6 +195,20 @@ test("no task leakage after scope exit", async () => {
   expect(done).toBe(true)
 })
 
+test("no task activity after scope settles", async () => {
+  const log: string[] = []
+  await scope(async s => {
+    s.spawn(async () => {
+      log.push("started")
+      await sleep(5)
+      log.push("finished")
+    })
+  })
+  log.push("scope-exited")
+  await sleep(20)
+  expect(log).toEqual(["started", "finished", "scope-exited"])
+})
+
 // --- ScopeOptions validation ---
 
 test("limit: 0 throws TypeError", () => {
@@ -288,6 +302,14 @@ test("s.active tracks pending tasks", async () => {
     actives.push(s.active)
   })
   expect(actives[0]).toBe(2)
+})
+
+test("synchronous throw in task is caught", async () => {
+  await expect(
+    scope(async s => {
+      s.spawn(() => { throw new Error("sync fail") })
+    })
+  ).rejects.toThrow("sync fail")
 })
 
 test("s.active includes queued tasks under limit", async () => {

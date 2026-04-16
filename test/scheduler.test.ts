@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
-import { scope, sleep, yieldNow, _resetScheduler } from "../src/index.js"
+import { scope, sleep, yieldNow } from "../src/index.js"
+import { _resetScheduler } from "../src/scheduler.js"
 
 test("multiple yields interleave tasks", async () => {
   const order: number[] = []

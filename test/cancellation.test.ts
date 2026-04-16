@@ -398,6 +398,42 @@ test("cancel in one sibling scope does not affect other", async () => {
   expect(otherRan).toBe(true)
 })
 
+// --- Pre-aborted signal paths ---
+
+test("sleep rejects immediately when signal already aborted", async () => {
+  let rejected = false
+  await expect(
+    scope(async s => {
+      s.spawn(async () => {
+        s.cancel()
+        try {
+          await sleep(10)
+        } catch {
+          rejected = true
+        }
+      })
+    })
+  ).rejects.toBeDefined()
+  expect(rejected).toBe(true)
+})
+
+test("yieldNow rejects immediately when signal already aborted", async () => {
+  let rejected = false
+  await expect(
+    scope(async s => {
+      s.spawn(async () => {
+        s.cancel()
+        try {
+          await yieldNow()
+        } catch {
+          rejected = true
+        }
+      })
+    })
+  ).rejects.toBeDefined()
+  expect(rejected).toBe(true)
+})
+
 // --- Error identity ---
 
 test("scope preserves error identity (same reference)", async () => {

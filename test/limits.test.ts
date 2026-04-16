@@ -232,6 +232,43 @@ test("slot freed by observed failed task allows queued task to run", async () =>
   expect(secondRan).toBe(true)
 })
 
+test("scheduled task cancelled before execution with limit", async () => {
+  // limit=2: first task cancels scope, second is already scheduled but not yet executed
+  const ran: number[] = []
+  await expect(
+    scope({ limit: 2 }, async s => {
+      s.spawn(() => {
+        ran.push(1)
+        s.cancel()
+      })
+      s.spawn(() => { ran.push(2) })
+    })
+  ).rejects.toBeDefined()
+  // First task ran and cancelled; second was scheduled but cancelled before execution
+  expect(ran).toEqual([1])
+})
+
+test("cancel during running task cleans up scheduled queued tasks", async () => {
+  const ran: number[] = []
+  await expect(
+    scope({ limit: 1 }, async s => {
+      s.spawn(async () => {
+        ran.push(1)
+        await sleep(10)
+        ran.push(2)
+      })
+      // These get queued behind limit
+      s.spawn(async () => { ran.push(3) })
+      s.spawn(async () => { ran.push(4) })
+      // Cancel while first task is running — queued tasks should not execute
+      await sleep(2)
+      s.cancel()
+    })
+  ).rejects.toBeDefined()
+  // Only first task started; queued tasks never ran
+  expect(ran).toEqual([1])
+})
+
 test("active count reflects queued tasks", async () => {
   let activeAfterSpawn = 0
   await scope({ limit: 1 }, async s => {

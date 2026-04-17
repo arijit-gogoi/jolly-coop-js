@@ -16,7 +16,15 @@
 //   3  jolly-bench run failed
 
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join, resolve } from "node:path"
 
@@ -24,6 +32,27 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = resolve(__dirname, "..")
 const SCENARIO = join(__dirname, "scope-stress.mjs")
 const DEFAULT_OUT = join(__dirname, "out")
+const KEEP_CANDIDATES = 3   // retain the last N candidate-*.ndjson files
+const KEEP_BASELINE_RAWS = 1 // retain the last N baseline-raw-*.ndjson files
+
+// Prune older run artifacts in DEFAULT_OUT. Keeps the newest N of each kind.
+// Only touches files that match `${prefix}-<digits>.ndjson`; other files
+// (user-written, non-pattern) are never deleted.
+function pruneOut(prefix, keep) {
+  if (!existsSync(DEFAULT_OUT)) return
+  const pattern = new RegExp(`^${prefix}-\\d+\\.ndjson$`)
+  const entries = readdirSync(DEFAULT_OUT)
+    .filter(f => pattern.test(f))
+    .map(f => {
+      const full = join(DEFAULT_OUT, f)
+      return { full, mtime: statSync(full).mtimeMs }
+    })
+    .sort((a, b) => b.mtime - a.mtime) // newest first
+  for (const { full } of entries.slice(keep)) {
+    try { unlinkSync(full) }
+    catch (err) { process.stderr.write(`warn: could not prune ${full}: ${(err).message}\n`) }
+  }
+}
 
 // ---- Argument parsing ----
 const args = process.argv.slice(2)
@@ -140,6 +169,10 @@ if (capturePath) {
     process.stderr.write(`\nsummary:\n${JSON.stringify(summary, null, 2)}\n`)
   }
 
+  // Prune older baseline-raw artifacts. The newest one (just written) is
+  // preserved by `.slice(keep)` because we sort newest-first.
+  pruneOut("baseline-raw", KEEP_BASELINE_RAWS)
+
   process.stderr.write(`\n✓ captured baseline at ${capturePath}\n`)
   process.exit(0)
 }
@@ -160,4 +193,9 @@ const diff = spawnSync(
   [join(__dirname, "diff.mjs"), baselinePath, candidatePath],
   { stdio: "inherit" }
 )
+
+// Prune AFTER the diff has finished reading. Newest-first sort guarantees
+// the candidate we just wrote is retained.
+pruneOut("candidate", KEEP_CANDIDATES)
+
 process.exit(diff.status ?? 3)

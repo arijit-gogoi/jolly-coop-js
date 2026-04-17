@@ -40,6 +40,15 @@ The committed baseline (`baseline-latest.json`) is a summary, not the raw sample
 
 ~300 bytes. Committed to git. The diff tool accepts either a summary `.json` or a raw `.ndjson` on either side. Candidate runs write NDJSON to `regression/out/` (git-ignored), then diff against the committed summary.
 
+### Auto-prune of `regression/out/`
+
+Each candidate run produces a ~20 MB NDJSON file. To keep disk usage bounded, the runner automatically prunes older artifacts after each run:
+
+- **Last 3** `candidate-*.ndjson` files retained (pruned after each `npm run regression`)
+- **Last 1** `baseline-raw-*.ndjson` file retained (pruned after each `npm run regression:baseline`)
+
+The newest file is always the one just written, so the current run is never at risk. Only files matching the exact pattern `${prefix}-<digits>.ndjson` are touched — hand-written files in `out/` are left alone. Tunable via `KEEP_CANDIDATES` and `KEEP_BASELINE_RAWS` in `run.mjs`.
+
 ## Usage
 
 ### Check current source against baseline

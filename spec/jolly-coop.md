@@ -83,6 +83,10 @@ export interface Scope {
   done(): void
 
   readonly signal: AbortSignal
+  readonly active: number
+  readonly completed: number
+  readonly failed: number
+  readonly cancelled: number
 }
 
 export interface Task<T> extends PromiseLike<T> {
@@ -99,9 +103,10 @@ export interface ScopeOptions {
 
 // Errors
 export class ScopeCancelledError extends Error {
-  readonly cause: "timeout" | "done"
+  readonly cause: "timeout" | "deadline" | "done"
 }
-export class TimeoutError extends ScopeCancelledError {}    // cause: "timeout"
+export class TimeoutError  extends ScopeCancelledError {}  // cause: "timeout"
+export class DeadlineError extends ScopeCancelledError {}  // cause: "deadline"
 export class ScopeDoneSignal extends ScopeCancelledError {} // cause: "done"
 ```
 
@@ -145,11 +150,22 @@ Signals that the scope's work is complete. Like `cancel`, this triggers the abor
 
 A read-only `AbortSignal` tied to the scope's lifetime. Tasks can pass this signal to cancellation-aware APIs like `fetch`, readable streams, or any other API that accepts an `AbortSignal`. When the scope is cancelled, this signal aborts automatically.
 
-### 3.9 `Task`
+### 3.10 Scope observability counters
+
+Every scope exposes four readonly numeric counters reflecting the state of tasks spawned within it:
+
+- **`active`** — Count of tasks that haven't reached a terminal state (running + queued under `{ limit }`). Decreases as tasks settle. Useful for backpressure: `active < limit` indicates headroom.
+- **`completed`** — Cumulative count of tasks that reached `"completed"`. Monotonic.
+- **`failed`** — Cumulative count of tasks that reached `"failed"` (uncaught throw from task body). Under fail-fast, at most 1 before the scope cancels; further task errors during cancellation are counted under `cancelled`. Monotonic.
+- **`cancelled`** — Cumulative count of tasks that reached `"cancelled"` — either because the scope cancelled them before execution (queued under `{ limit }`) or because they were running when the scope cancelled. Monotonic.
+
+Invariant: for any scope at any observation point, `active + completed + failed + cancelled` equals the number of tasks spawned so far.
+
+### 3.11 `Task`
 
 A `Task` represents a unit of work within a scope. It extends `PromiseLike`, so it can be awaited like a standard promise. Each task has a unique numeric `id` and a `state` property reflecting its current position in the lifecycle state machine.
 
-### 3.10 `ScopeOptions`
+### 3.12 `ScopeOptions`
 
 Configuration for a scope's behavior:
 
@@ -158,13 +174,37 @@ Configuration for a scope's behavior:
 - **`limit`** — The maximum number of tasks that may run concurrently within the scope. Excess tasks are queued and start as running tasks complete.
 - **`signal`** — An external `AbortSignal` that, when aborted, cancels the scope. This allows integration with external cancellation sources.
 
-### 3.11 `TimeoutError`
+### 3.13 `TimeoutError`
 
-A dedicated error class thrown when a scope exceeds its configured timeout or deadline. Subclass of `ScopeCancelledError` with `cause === "timeout"`.
+Thrown when a scope configured with the **relative** `timeout` option exceeds its duration. Subclass of `ScopeCancelledError` with `cause === "timeout"`. For the **absolute** `deadline` option, see `DeadlineError`.
 
-### 3.12 `ScopeCancelledError`
+### 3.14 `DeadlineError`
 
-Parent class for the errors Jolly itself creates when cancelling a scope for a structural reason (`TimeoutError`, `ScopeDoneSignal`). Carries a `cause: "timeout" | "done"` discriminator so callers can branch on the kind of cancellation. Manual `cancel(reason)` and external-signal aborts do **not** wrap the reason — they preserve identity, so `ScopeCancelledError` appears only when the runtime itself synthesized a cancellation reason.
+Thrown when a scope configured with the **absolute** `deadline` option (an epoch-based timestamp) reaches its deadline. Subclass of `ScopeCancelledError` with `cause === "deadline"`. Distinct from `TimeoutError` so callers can tell whether the scope ran out of duration-relative time or hit a wall-clock end-time.
+
+### 3.15 `ScopeCancelledError`
+
+Parent class for the errors Jolly itself creates when cancelling a scope for a structural reason (`TimeoutError`, `DeadlineError`, `ScopeDoneSignal`). Carries a `cause: "timeout" | "deadline" | "done"` discriminator so callers can branch on the kind of cancellation. Manual `cancel(reason)` and external-signal aborts do **not** wrap the reason — they preserve identity, so `ScopeCancelledError` appears only when the runtime itself synthesized a cancellation reason.
+
+#### Recommended categorization pattern
+
+```typescript
+try { await scope(opts, fn) }
+catch (err) {
+  if (err instanceof ScopeCancelledError) {
+    switch (err.cause) {
+      case "timeout":  // relative `timeout` elapsed
+      case "deadline": // absolute `deadline` reached
+      case "done":     // unreachable in practice — `done()` resolves
+    }
+  } else {
+    // err is exactly the user-supplied `cancel(reason)` or external
+    // `signal.reason`. Identity is preserved (err === reason).
+  }
+}
+```
+
+Use `instanceof ScopeCancelledError` to unify all three structural causes in one catch branch; use `.cause` or narrower `instanceof` for discrimination.
 
 ---
 
@@ -263,6 +303,27 @@ Explicit signal threading was chosen over three alternatives:
 Explicit threading makes cancellation propagation visible at the call site. It survives refactors that insert intermediate `await`s. It fails noisily (when paired with the expectation of cancellation) rather than silently. The minor verbosity is the design paying its own correctness tax.
 
 Implementations may provide lint-level detection of unthreaded nested scopes, but the runtime does not error on them — a nested scope without inherited signal is a valid, independent lifetime.
+
+### 5.6 Settle-Reason Precedence
+
+When multiple cancellation sources race, the first to fire wins the scope's settle reason. The following table is exhaustive:
+
+| First to fire            | Scope settles with                                        |
+|--------------------------|-----------------------------------------------------------|
+| `options.signal` aborts  | **rejects** with `signal.reason` (identity preserved)     |
+| `options.deadline` reached | **rejects** with `DeadlineError` (`.cause = "deadline"`) |
+| `options.timeout` elapsed | **rejects** with `TimeoutError` (`.cause = "timeout"`)   |
+| Task body throws         | **rejects** with the thrown error (identity preserved)    |
+| `scope.cancel(reason)`   | **rejects** with `reason` (identity preserved)            |
+| `scope.done()`           | **resolves**; `signal.reason = ScopeDoneSignal`           |
+
+Within a single scope:
+
+- If both `timeout` and `deadline` are set, **`deadline` wins the timer**. Only one synthetic error is ever constructed per scope; the loser never fires.
+- If `options.signal` aborts before either timer fires, **the external reason wins**. `DeadlineError` / `TimeoutError` is not constructed, and the scope rejects with `signal.reason` as the user provided it.
+- A task error racing the timer has normal fail-fast precedence: whichever reaches `cancel()` first wins `firstError`, and subsequent cancellations are no-ops (`cancel` is idempotent).
+
+Identity preservation matters: code like `try { await scope(...) } catch (e) { if (e === myReason) ... }` continues to work for manual and external cancellations.
 
 ---
 

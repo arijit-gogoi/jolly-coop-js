@@ -1,12 +1,10 @@
 import type { Scope, ScopeOptions, Task } from "./types.js"
 import { TaskImpl } from "./task.js"
-import { TimeoutError } from "./errors.js"
-import { schedule, runWithSignal, getCurrentSignal } from "./scheduler.js"
+import { TimeoutError, ScopeDoneError } from "./errors.js"
+import { schedule } from "./scheduler.js"
 
 class ScopeImpl {
   private abortController = new AbortController()
-  private taskCount = 0
-  private incompleteTasks = false
   private pendingCount = 0
   private resources: Array<{ value: unknown; disposer: (value: any) => Promise<void> | void }> = []
   private cancelled = false
@@ -62,13 +60,11 @@ class ScopeImpl {
   spawn<T>(fn: () => Promise<T> | T): Task<T> {
     const task = new TaskImpl<T>(fn)
     task._scope = this
-    this.taskCount++
     this.pendingCount++
 
     if (this.cancelled) {
       task.transition("cancelled")
       task.reject(this.cancelReason)
-      this.incompleteTasks = true
       this.taskDone()
       return task as unknown as Task<T>
     }
@@ -94,7 +90,6 @@ class ScopeImpl {
     if (this.cancelled && task.internalState === "created") {
       task.transition("cancelled")
       task.reject(this.cancelReason)
-      this.incompleteTasks = true
       if (this.limit !== undefined) {
         this.runningCount--
         this.dequeueNext()
@@ -107,7 +102,7 @@ class ScopeImpl {
 
     let result: unknown
     try {
-      result = runWithSignal(this.signal, task.fn)
+      result = task.fn()
     } catch (err) {
       // Synchronous throw
       this.handleTaskError(task, err)
@@ -134,7 +129,6 @@ class ScopeImpl {
     if (this.cancelled) {
       task.transition("cancelled")
       task.reject(this.cancelReason)
-      this.incompleteTasks = true
     } else {
       task.transition("completed")
       task.resolve(value)
@@ -146,11 +140,9 @@ class ScopeImpl {
     if (this.cancelled) {
       task.transition("cancelled")
       task.reject(this.cancelReason)
-      this.incompleteTasks = true
     } else {
       task.transition("failed")
       task.reject(err)
-      this.incompleteTasks = true
       // Defer scope cancellation — only cancel if error wasn't observed
       Promise.resolve().then(() => {
         if (!task.observed) {
@@ -178,8 +170,7 @@ class ScopeImpl {
       if (this.cancelled && next.internalState === "created") {
         next.transition("cancelled")
         next.reject(this.cancelReason)
-        this.incompleteTasks = true
-        this.taskDone()
+          this.taskDone()
         continue
       }
       // FIX 1: Increment runningCount at dequeue time
@@ -208,8 +199,7 @@ class ScopeImpl {
       if (task.internalState === "created") {
         task.transition("cancelled")
         task.reject(this.cancelReason)
-        this.incompleteTasks = true
-        this.taskDone()
+          this.taskDone()
       }
     }
   }
@@ -217,7 +207,7 @@ class ScopeImpl {
   done(): void {
     if (this.cancelled) return
     this._doneGracefully = true
-    this.cancel()
+    this.cancel(new ScopeDoneError())
   }
 
   async resource<T>(
@@ -314,10 +304,7 @@ class ScopeImpl {
       throw this.firstError
     }
     if (this.cancelled && !this._doneGracefully) {
-      // If every spawned task reached "completed", cancel had no effect — resolve normally
-      if (this.taskCount === 0 || this.incompleteTasks) {
-        throw this.cancelReason
-      }
+      throw this.cancelReason
     }
     return rootResult as T
   }
@@ -338,12 +325,6 @@ export function scope<T>(
   } else {
     options = optionsOrFn
     fn = maybeFn!
-  }
-
-  // FIX 4: Propagate parent signal to nested scopes
-  const parentSignal = getCurrentSignal()
-  if (parentSignal && !options.signal) {
-    options = { ...options, signal: parentSignal }
   }
 
   const impl = new ScopeImpl(options)

@@ -4,3 +4,10 @@ export class TimeoutError extends Error {
     this.name = "TimeoutError"
   }
 }
+
+export class ScopeDoneError extends Error {
+  constructor(message = "Scope done") {
+    super(message)
+    this.name = "ScopeDoneError"
+  }
+}

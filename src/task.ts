@@ -1,7 +1,14 @@
 import type { TaskState } from "./types.js"
 
 const noop = () => {}
+const MAX_ID = Number.MAX_SAFE_INTEGER
 let nextId = 1
+
+function allocId(): number {
+  const id = nextId
+  nextId = nextId >= MAX_ID ? 1 : nextId + 1
+  return id
+}
 
 const VALID_TRANSITIONS: Record<string, Set<string>> = {
   created:   new Set(["running", "cancelled"]),
@@ -23,7 +30,7 @@ export class TaskImpl<T> {
   _scope: { executeTask(task: TaskImpl<unknown>): void } | null = null
 
   constructor(fn: () => Promise<T> | T) {
-    this.id = nextId++
+    this.id = allocId()
     this.fn = fn
     this.promise = new Promise<T>((resolve, reject) => {
       this._resolve = resolve

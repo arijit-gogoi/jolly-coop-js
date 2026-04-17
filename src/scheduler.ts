@@ -104,23 +104,6 @@ export function schedule(entry: Schedulable): void {
   scheduleNextTick()
 }
 
-// Execution context: tracks the active scope's AbortSignal
-let _currentSignal: AbortSignal | null = null
-
-export function runWithSignal<T>(signal: AbortSignal, fn: () => T): T {
-  const prev = _currentSignal
-  _currentSignal = signal
-  try {
-    return fn()
-  } finally {
-    _currentSignal = prev
-  }
-}
-
-export function getCurrentSignal(): AbortSignal | null {
-  return _currentSignal
-}
-
 export function _resetScheduler(): void {
   _buf = new Array(INITIAL_BUFFER)
   _mask = INITIAL_BUFFER - 1
@@ -128,5 +111,4 @@ export function _resetScheduler(): void {
   _tail = 0
   _size = 0
   scheduled = false
-  _currentSignal = null
 }

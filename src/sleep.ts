@@ -1,9 +1,7 @@
-import { schedule, getCurrentSignal } from "./scheduler.js"
+import { schedule } from "./scheduler.js"
 
-export function sleep(ms: number): Promise<void> {
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const signal = getCurrentSignal()
-
     if (signal?.aborted) {
       reject(signal.reason)
       return
@@ -25,26 +23,16 @@ export function sleep(ms: number): Promise<void> {
   })
 }
 
-export function yieldNow(): Promise<void> {
-  const signal = getCurrentSignal()
+export function yieldNow(signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason)
       return
     }
     schedule(() => {
-      if (signal) {
-        // Signal-aware: defer by one microtask so peer immediate-resolves
-        // (e.g. root-fn resume → cancel) fire their continuations first
-        queueMicrotask(() => {
-          if (signal.aborted) {
-            reject(signal.reason)
-          } else {
-            resolve()
-          }
-        })
+      if (signal?.aborted) {
+        reject(signal.reason)
       } else {
-        // No signal context: resolve immediately
         resolve()
       }
     })

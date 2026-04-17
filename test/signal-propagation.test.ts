@@ -2,10 +2,10 @@
 // 1. Multi-await cancellation (2+ sleeps per task, cancel between them)
 // 2. Nested scope created after first await — inherits parent signal via options.signal
 // 3. yieldNow after first await
-// 4. done() reason on signal (ScopeDoneError)
+// 4. done() reason on signal (ScopeDoneSignal)
 
 import { expect, test } from "vitest"
-import { scope, sleep, yieldNow, ScopeDoneError } from "../src/index.js"
+import { scope, sleep, yieldNow, ScopeDoneSignal } from "../src/index.js"
 
 // --- Gap 1: Multi-await cancellation ---
 
@@ -115,7 +115,7 @@ test("yieldNow with pre-aborted signal rejects immediately", async () => {
 
 // --- Gap 4: done() reason on signal ---
 
-test("done() sets ScopeDoneError as signal reason", async () => {
+test("done() sets ScopeDoneSignal as signal reason", async () => {
   let observedReason: unknown = null
   await scope(async s => {
     s.spawn(async () => {
@@ -125,10 +125,10 @@ test("done() sets ScopeDoneError as signal reason", async () => {
     await sleep(10)
     s.done()
   })
-  expect(observedReason).toBeInstanceOf(ScopeDoneError)
+  expect(observedReason).toBeInstanceOf(ScopeDoneSignal)
 })
 
-test("cancel() sets non-ScopeDoneError reason on signal", async () => {
+test("cancel() sets non-ScopeDoneSignal reason on signal", async () => {
   let observedReason: unknown = null
   await expect(
     scope(async s => {
@@ -140,7 +140,7 @@ test("cancel() sets non-ScopeDoneError reason on signal", async () => {
       s.cancel()
     })
   ).rejects.toBeDefined()
-  expect(observedReason).not.toBeInstanceOf(ScopeDoneError)
+  expect(observedReason).not.toBeInstanceOf(ScopeDoneSignal)
 })
 
 test("cancel with custom reason preserves reason on signal", async () => {

@@ -1,6 +1,6 @@
 import type { Scope, ScopeOptions, Task } from "./types.js"
 import { TaskImpl } from "./task.js"
-import { TimeoutError, ScopeDoneError } from "./errors.js"
+import { TimeoutError, ScopeDoneSignal } from "./errors.js"
 import { schedule } from "./scheduler.js"
 
 class ScopeImpl {
@@ -205,7 +205,7 @@ class ScopeImpl {
   done(): void {
     if (this.cancelled) return
     this._doneGracefully = true
-    this.cancel(new ScopeDoneError())
+    this.cancel(new ScopeDoneSignal())
   }
 
   async resource<T>(

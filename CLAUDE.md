@@ -23,8 +23,15 @@ Jolly is a structured concurrency runtime for JS (Node, Bun, Deno, browser). Sco
 
 ## Commands
 - `npm test` — unit tests (all must pass)
-- `npm run bench` — behavioral benchmarks (11 via tsx: event loop lag, fairness, limits, I/O sim, memory)
-- `npm run bench:vi` — microbenchmarks (9 benchmarks via vitest bench: throughput, latency with statistical analysis)
+- `npm run bench` — behavioral benchmarks (event loop lag, fairness, limits, I/O sim, memory)
+- `npm run bench:vi` — microbenchmarks via vitest bench (throughput, latency with statistical analysis)
+- `npm run regression` — integration regression vs committed baseline (uses jolly-bench downstream)
+- `npm run regression:baseline` — capture a new baseline (after a release)
+
+## Which benchmark when
+- `bench/` — behavioral *property* check ("did fairness hold? did event loop stall?"). Run when designing a scheduler change to confirm the property still holds, not for absolute numbers.
+- `bench:vi/` — primitive-level *cost* check ("how many ns does one spawn cost?"). Run when optimizing a hot path; use the statistical output, not eyeball deltas.
+- `regression/` — integration-level *delta* check ("did the runtime as a whole slow down vs the published baseline?"). Run before tagging a release or merging changes to scheduler/scope/sleep/task. Not for narrow questions; this catches what the other two miss.
 
 ## Commit & Documentation Discipline
 - Use Conventional Commits: `<type>(scope): description` (types: feat, fix, docs, style, refactor, test, chore).

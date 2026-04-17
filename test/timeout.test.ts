@@ -6,11 +6,11 @@ test("timeout cancels multiple tasks", async () => {
   await expect(
     scope({ timeout: 10 }, async s => {
       s.spawn(async () => {
-        await sleep(50)
+        await sleep(50, s.signal)
         ran++
       })
       s.spawn(async () => {
-        await sleep(50)
+        await sleep(50, s.signal)
         ran++
       })
     })
@@ -53,9 +53,9 @@ test("timeout cancels nested scopes", async () => {
   await expect(
     scope({ timeout: 10 }, async s => {
       s.spawn(async () => {
-        await scope(async inner => {
+        await scope({ signal: s.signal }, async inner => {
           inner.spawn(async () => {
-            await sleep(50)
+            await sleep(50, inner.signal)
             ran = true
           })
         })
@@ -122,9 +122,9 @@ test("parent timeout cancels nested child scope", async () => {
   await expect(
     scope({ timeout: 10 }, async s => {
       s.spawn(async () => {
-        await scope(async inner => {
+        await scope({ signal: s.signal }, async inner => {
           inner.spawn(async () => {
-            await sleep(100)
+            await sleep(100, inner.signal)
             childRan = true
           })
         })

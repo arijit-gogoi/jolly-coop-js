@@ -68,7 +68,7 @@ it("18.3 fail-fast error propagation", async () => {
       })
 
       s.spawn(async () => {
-        await sleep(100)
+        await sleep(100, s.signal)
         secondTaskRan = true
       })
     })
@@ -83,7 +83,7 @@ it("18.4 timeout", async () => {
   await expect(
     scope({ timeout: 50 }, async s => {
       s.spawn(async () => {
-        await sleep(5000)
+        await sleep(5000, s.signal)
       })
     })
   ).rejects.toThrow(TimeoutError)
@@ -194,13 +194,13 @@ it("18.9 nested scopes", async () => {
 it("18.10 cooperative yielding", async () => {
   let iterations = 0
 
-  function heavyComputation(i: number) { iterations++ }
+  function heavyComputation(_i: number) { iterations++ }
 
   await scope(async s => {
     s.spawn(async () => {
       for (let i = 0; i < 1000; i++) {
         heavyComputation(i)
-        await yieldNow()
+        await yieldNow(s.signal)
       }
     })
   })
@@ -211,13 +211,11 @@ it("18.10 cooperative yielding", async () => {
 // --- 18.11 Deadline ---
 
 it("18.11 deadline", async () => {
-  async function longRunningTask() { await sleep(5000) }
-
   await expect(
     scope(
       { deadline: Date.now() + 50 },
       async s => {
-        s.spawn(longRunningTask)
+        s.spawn(async () => { await sleep(5000, s.signal) })
       }
     )
   ).rejects.toThrow(TimeoutError)

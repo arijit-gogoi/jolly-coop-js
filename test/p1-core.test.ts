@@ -59,7 +59,7 @@ test("error cancels sibling tasks", async () => {
         throw new Error("fail")
       })
       s.spawn(async () => {
-        await sleep(20)
+        await sleep(20, s.signal)
         ran = true
       })
     })
@@ -134,8 +134,8 @@ test("resource cleanup happens after tasks", async () => {
 test("resources cleaned in reverse order", async () => {
   const order: number[] = []
   await scope(async s => {
-    await s.resource({}, () => order.push(1))
-    await s.resource({}, () => order.push(2))
+    await s.resource({}, () => { order.push(1) })
+    await s.resource({}, () => { order.push(2) })
   })
   expect(order).toEqual([2, 1])
 })

@@ -33,7 +33,7 @@ test("cancel stops task continuation after await", async () => {
     scope(async s => {
       s.spawn(async () => {
         step = 1
-        await sleep(50)
+        await sleep(50, s.signal)
         step = 2
       })
       await sleep(5)
@@ -61,11 +61,14 @@ test("cancel propagates deeply", async () => {
   expect(ran).toBe(false)
 })
 
-test("cancel after completion has no effect", async () => {
-  await scope(async s => {
-    await s.spawn(async () => {})
-    s.cancel()
-  })
+test("cancel after all tasks completed still rejects", async () => {
+  // Spec §3.7: cancel always rejects, regardless of whether tasks finished first.
+  await expect(
+    scope(async s => {
+      await s.spawn(async () => {})
+      s.cancel()
+    })
+  ).rejects.toBeDefined()
 })
 
 test("multiple cancel calls are stable", async () => {
@@ -130,7 +133,7 @@ test("cancel wins over slow completion", async () => {
   await expect(
     scope(async s => {
       s.spawn(async () => {
-        await sleep(50)
+        await sleep(50, s.signal)
         finished = true
       })
       await sleep(5)
@@ -179,17 +182,17 @@ test("inner cancel does not cancel outer scope", async () => {
   expect(outerRan).toBe(true)
 })
 
-test("cancel after yield prevents continuation", async () => {
+test("cancel after sleep prevents continuation in yielding task", async () => {
   let step = 0
   await expect(
     scope(async s => {
       s.spawn(async () => {
         step = 1
-        await yieldNow()
+        await sleep(20, s.signal)
+        await yieldNow(s.signal)
         step = 2
       })
-      // yieldNow orders correctly with task continuations via microtask deferral
-      await yieldNow()
+      await sleep(5)
       s.cancel()
     })
   ).rejects.toBeDefined()
@@ -321,10 +324,10 @@ test("parent cancel propagates signal to nested scope tasks", async () => {
   await expect(
     scope(async s => {
       s.spawn(async () => {
-        await scope(async inner => {
+        await scope({ signal: s.signal }, async inner => {
           inner.spawn(async () => {
             try {
-              await sleep(100)
+              await sleep(100, inner.signal)
             } catch {
               // Task was cancelled — signal must be aborted
               childSignalAborted = inner.signal.aborted
@@ -407,7 +410,7 @@ test("sleep rejects immediately when signal already aborted", async () => {
       s.spawn(async () => {
         s.cancel()
         try {
-          await sleep(10)
+          await sleep(10, s.signal)
         } catch {
           rejected = true
         }
@@ -424,7 +427,7 @@ test("yieldNow rejects immediately when signal already aborted", async () => {
       s.spawn(async () => {
         s.cancel()
         try {
-          await yieldNow()
+          await yieldNow(s.signal)
         } catch {
           rejected = true
         }

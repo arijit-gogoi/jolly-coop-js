@@ -254,7 +254,7 @@ test("cancel during running task cleans up scheduled queued tasks", async () => 
     scope({ limit: 1 }, async s => {
       s.spawn(async () => {
         ran.push(1)
-        await sleep(10)
+        await sleep(10, s.signal)
         ran.push(2)
       })
       // These get queued behind limit

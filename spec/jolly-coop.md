@@ -70,6 +70,14 @@ export function scope<T>(
 export function sleep(ms: number, signal?: AbortSignal): Promise<void>
 export function yieldNow(signal?: AbortSignal): Promise<void>
 
+// Result utility
+export function toResult<T, E = unknown>(
+  input: Promise<T> | (() => Promise<T> | T)
+): Promise<Result<T, E>>
+export type Result<T, E = unknown> =
+  | { ok: true; value: T }
+  | { ok: false; error: E }
+
 // Types
 export interface Scope {
   spawn<T>(fn: () => Promise<T> | T): Task<T>
@@ -126,31 +134,53 @@ Suspends the current task for the specified number of milliseconds. If an `Abort
 
 Yields control back to the scheduler, allowing other tasks in the run queue to execute. If an `AbortSignal` is passed and it aborts before the continuation runs, `yieldNow` rejects with the signal's reason. Long-running computational tasks should call `yieldNow` periodically to avoid starving other tasks.
 
-### 3.5 `Scope.spawn(fn)`
+### 3.5 `toResult(input)`
+
+Turns a promise, async thunk, or sync thunk into a `Result<T, E>` — never rejects, always resolves with either `{ ok: true, value }` or `{ ok: false, error }`. The canonical way to observe an **expected rejection** (scope timeout, deadline, manual cancel, external signal abort) without a `.catch(() => {})` ceremony or a sibling variable to record the error.
+
+Accepts three input shapes:
+
+- A `Promise<T>` — awaited directly
+- An async thunk `() => Promise<T>` — called, then awaited
+- A sync thunk `() => T` — called; sync throws captured
+
+Error identity is preserved. If the source rejects with or throws value `X`, the returned result has `error === X` — no wrapping, no normalization. This composes with jolly-coop's existing error-identity contract: a scope that rejects with a user-supplied `cancel(reason)` value is observable by `r.ok === false && r.error === reason`.
+
+```typescript
+const r = await toResult(scope({ timeout: 500 }, async s => doWork(s)))
+if (!r.ok) {
+  if (r.error instanceof TimeoutError) handleTimeout()
+  else throw r.error // unexpected
+}
+```
+
+Use when the rejection is anticipated and you want it flattened into a value. For unexpected errors, prefer plain `try/catch` — `toResult` will happily swallow them into `{ ok: false }`, which is usually not what you want.
+
+### 3.6 `Scope.spawn(fn)`
 
 Creates a new task within the scope. The function `fn` must be a callable that returns a value, a promise, or an async function. `spawn` does **not** accept raw promises — it requires a function so that the runtime controls when execution begins.
 
 The returned `Task` object implements `PromiseLike` and can be awaited to retrieve the task's result. The task begins execution under scheduler control, not synchronously at the call site.
 
-### 3.6 `Scope.resource(value, disposer)`
+### 3.7 `Scope.resource(value, disposer)`
 
 Registers a resource with the scope. The `value` may be a direct value or a promise that resolves to the value. The `disposer` is a function called with the resolved value when the scope exits. Disposers may be synchronous or asynchronous.
 
 Resources are cleaned up in **reverse registration order** — the last resource registered is the first to be disposed. This mirrors the stack-like semantics familiar from other resource management patterns (e.g., `defer` in Go, RAII in C++).
 
-### 3.7 `Scope.cancel(reason?)`
+### 3.8 `Scope.cancel(reason?)`
 
 Manually cancels the scope. This marks the scope as cancelled, triggers the abort signal, and propagates cancellation to all child tasks and child scopes. An optional reason may be provided for diagnostic purposes. Calling `cancel` multiple times is safe and idempotent. The scope rejects with the cancellation reason — this holds regardless of whether any tasks were active at the time of cancellation. `cancel` called after all tasks have already completed still causes the scope to reject.
 
-### 3.8 `Scope.done()`
+### 3.9 `Scope.done()`
 
 Signals that the scope's work is complete. Like `cancel`, this triggers the abort signal so background tasks can wind down. Unlike `cancel`, the scope resolves normally instead of rejecting. The signal's reason is a `ScopeDoneSignal` instance (a subclass of `ScopeCancelledError` with `cause === "done"`), distinct from a manual `cancel()` — observers checking `s.signal.reason` can distinguish graceful shutdown from cancellation. Errors still take precedence — if a task error occurred before `done()`, the scope rejects with that error. If `cancel()` was called before `done()`, cancel wins. Idempotent.
 
-### 3.9 `Scope.signal`
+### 3.10 `Scope.signal`
 
 A read-only `AbortSignal` tied to the scope's lifetime. Tasks can pass this signal to cancellation-aware APIs like `fetch`, readable streams, or any other API that accepts an `AbortSignal`. When the scope is cancelled, this signal aborts automatically.
 
-### 3.10 Scope observability counters
+### 3.11 Scope observability counters
 
 Every scope exposes four readonly numeric counters reflecting the state of tasks spawned within it:
 
@@ -161,11 +191,11 @@ Every scope exposes four readonly numeric counters reflecting the state of tasks
 
 Invariant: for any scope at any observation point, `active + completed + failed + cancelled` equals the number of tasks spawned so far.
 
-### 3.11 `Task`
+### 3.12 `Task`
 
 A `Task` represents a unit of work within a scope. It extends `PromiseLike`, so it can be awaited like a standard promise. Each task has a unique numeric `id` and a `state` property reflecting its current position in the lifecycle state machine.
 
-### 3.12 `ScopeOptions`
+### 3.13 `ScopeOptions`
 
 Configuration for a scope's behavior:
 
@@ -174,15 +204,15 @@ Configuration for a scope's behavior:
 - **`limit`** — The maximum number of tasks that may run concurrently within the scope. Excess tasks are queued and start as running tasks complete.
 - **`signal`** — An external `AbortSignal` that, when aborted, cancels the scope. This allows integration with external cancellation sources.
 
-### 3.13 `TimeoutError`
+### 3.14 `TimeoutError`
 
 Thrown when a scope configured with the **relative** `timeout` option exceeds its duration. Subclass of `ScopeCancelledError` with `cause === "timeout"`. For the **absolute** `deadline` option, see `DeadlineError`.
 
-### 3.14 `DeadlineError`
+### 3.15 `DeadlineError`
 
 Thrown when a scope configured with the **absolute** `deadline` option (an epoch-based timestamp) reaches its deadline. Subclass of `ScopeCancelledError` with `cause === "deadline"`. Distinct from `TimeoutError` so callers can tell whether the scope ran out of duration-relative time or hit a wall-clock end-time.
 
-### 3.15 `ScopeCancelledError`
+### 3.16 `ScopeCancelledError`
 
 Parent class for the errors Jolly itself creates when cancelling a scope for a structural reason (`TimeoutError`, `DeadlineError`, `ScopeDoneSignal`). Carries a `cause: "timeout" | "deadline" | "done"` discriminator so callers can branch on the kind of cancellation. Manual `cancel(reason)` and external-signal aborts do **not** wrap the reason — they preserve identity, so `ScopeCancelledError` appears only when the runtime itself synthesized a cancellation reason.
 

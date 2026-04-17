@@ -80,6 +80,7 @@ Catching after `await t` is too late — the scope will have already started can
 | `scope` | `(options, fn) => Promise<T>` | Same, with options (timeout, limit, signal) |
 | `sleep` | `(ms, signal?) => Promise<void>` | Cancellation-aware sleep. Pass `s.signal` to observe scope cancellation. |
 | `yieldNow` | `(signal?) => Promise<void>` | Yield to the scheduler. Pass `s.signal` to observe scope cancellation. |
+| `toResult` | `(p \| thunk) => Promise<Result<T>>` | Turn an expected-rejection promise into `{ ok, value } \| { ok, error }`. Preserves error identity. |
 | `TimeoutError` | class | Thrown when a scope's **relative** `timeout` elapses. Subclass of `ScopeCancelledError`, `.cause === "timeout"`. |
 | `DeadlineError` | class | Thrown when a scope's **absolute** `deadline` is reached. Subclass of `ScopeCancelledError`, `.cause === "deadline"`. |
 | `ScopeDoneSignal` | class | Signal reason when `s.done()` aborts the scope's signal. Subclass of `ScopeCancelledError`, `.cause === "done"`. Named "Signal" because it marks intentional shutdown, not failure. |
@@ -119,31 +120,45 @@ Tasks implement `PromiseLike<T>` and can be awaited.
 
 ## Contract
 
-The load-bearing behaviors, in one place. These appear as JSDoc on the public types (hover in your IDE); this section is the prose version for skimming.
+Load-bearing behaviors. Full JSDoc on hover in your IDE.
 
-**Time bounds.** `timeout` is a **relative** duration in ms — fires `TimeoutError`. `deadline` is an **absolute** `Date.now()`-based timestamp — fires `DeadlineError`. Both are subclasses of `ScopeCancelledError`. Use `deadline` when you need the same end-time to apply to nested scopes (compute once, pass down). If both are set, `deadline` wins the timer.
-
-**`spawn` is non-blocking.** `spawn(fn)` returns immediately with a `Task<T>` handle, even when the scope is at its `limit`. Excess tasks queue internally in FIFO order. Queued tasks honor cancellation — cancelling the scope transitions them to `"cancelled"` without ever executing.
-
-**Task bodies must yield periodically.** A synchronous loop with no `await` monopolizes the event loop; cancellation can't interrupt, the scope appears hung even when the deadline fires, and memory can exhaust before abort propagates. If your task has no natural I/O, call `yieldNow(s.signal)` inside the loop.
-
-**`done()` resolves; `cancel()` rejects.** `s.done()` marks the scope as intentionally finished: the scope's promise **resolves normally** (assuming no prior task errors), and `s.signal` aborts with a `ScopeDoneSignal` reason so cooperating tasks can distinguish graceful shutdown from cancellation. `s.cancel(reason)` **rejects** the scope with `reason` (identity preserved — `err === reason` after catch).
-
-**Error identity is preserved.** Manual `cancel(reason)` and external-signal aborts pass the reason through unchanged. Only structural cancellations (timeout, deadline, done) synthesize their own reason — these are subclasses of `ScopeCancelledError`.
+- **`timeout`** — relative ms, fires `TimeoutError`. **`deadline`** — absolute `Date.now()`-based ts, fires `DeadlineError`. Both extend `ScopeCancelledError`. `deadline` wins if both are set.
+- **`spawn` is non-blocking.** Returns a `Task<T>` immediately; under `{ limit }` excess tasks queue FIFO and honor cancellation.
+- **Task bodies must yield.** A sync loop with no `await` can't be cancelled and may exhaust memory before abort propagates. Call `yieldNow(s.signal)` in tight loops without natural I/O.
+- **`done()` resolves; `cancel(reason)` rejects.** `done` aborts `signal` with `ScopeDoneSignal` (graceful); `cancel` rejects with `reason` (identity preserved).
+- **Error identity is preserved.** `cancel(reason)` and external `signal.reason` pass through unwrapped. Only structural cancels (timeout, deadline, done) synthesize — all extend `ScopeCancelledError`.
+- **LIFO resource cleanup.** Disposers run in reverse registration order on scope exit. Disposer errors are contained.
+- **Fail-fast on task errors.** Uncaught throw from a `spawn`'d body cancels the scope immediately. To recover, catch inside the body and return `{ ok, value | error }`. Catching after `await task` is too late.
 
 ### Settle-reason precedence
 
 When multiple cancellation sources race, the first to fire wins:
 
-| First to fire          | Scope settles with                                     |
-|------------------------|--------------------------------------------------------|
-| `options.signal` aborts | rejects with `signal.reason` (identity preserved)     |
-| `options.deadline` reached | rejects with `DeadlineError` (`.cause = "deadline"`) |
-| `options.timeout` elapsed | rejects with `TimeoutError` (`.cause = "timeout"`)   |
-| `s.cancel(reason)`     | rejects with `reason` (identity preserved)             |
-| `s.done()`             | **resolves**; signal reason = `ScopeDoneSignal`        |
+| First to fire              | Scope settles with                                     |
+|----------------------------|--------------------------------------------------------|
+| `options.signal` aborts    | rejects with `signal.reason` (identity preserved)      |
+| `options.deadline` reached | rejects with `DeadlineError` (`.cause = "deadline"`)   |
+| `options.timeout` elapsed  | rejects with `TimeoutError` (`.cause = "timeout"`)     |
+| `s.cancel(reason)`         | rejects with `reason` (identity preserved)             |
+| `s.done()`                 | **resolves**; signal reason = `ScopeDoneSignal`        |
 
-### Recommended error categorization
+### Observing an expected rejection: `toResult`
+
+When rejection is anticipated (scope timed out, was cancelled), wrap the call in `toResult` to flatten into a discriminated union:
+
+```js
+import { scope, toResult, TimeoutError } from "jolly-coop"
+
+const r = await toResult(scope({ timeout: 500 }, async s => doWork(s)))
+if (!r.ok) {
+  if (r.error instanceof TimeoutError) handleTimeout()
+  else throw r.error // unexpected
+}
+```
+
+`toResult` accepts a promise, an async thunk, or a sync thunk. Error identity is preserved. Prefer plain `try/catch` when the rejection would be a bug, not a known outcome.
+
+### Error categorization
 
 ```js
 try { await scope(opts, fn) }
@@ -152,19 +167,15 @@ catch (err) {
     switch (err.cause) {
       case "timeout":  // relative `timeout` elapsed
       case "deadline": // absolute `deadline` reached
-      case "done":     // unreachable in practice — done() resolves
+      case "done":     // unreachable — done() resolves, doesn't throw
     }
   } else {
-    // err is exactly what was passed to cancel(), or external signal.reason
+    // err is the cancel(reason) or external signal.reason — identity preserved
   }
 }
 ```
 
-Use `instanceof ScopeCancelledError` for the catch-all; use `.cause` or a narrower `instanceof` to discriminate.
-
-**LIFO resource cleanup.** Resources dispose in reverse registration order on scope exit, regardless of outcome. Disposer errors are contained.
-
-**Fail-fast on task errors.** An uncaught throw from a `spawn`'d task body cancels the scope immediately. To recover from an expected failure, catch inside the task body and return an error-as-value (`{ ok, value | error }`). Catching after `await task` is too late.
+`instanceof ScopeCancelledError` catches all structural cancels; `.cause` or a narrower `instanceof` discriminates.
 
 ## Backpressure
 

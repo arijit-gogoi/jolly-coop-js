@@ -67,8 +67,8 @@ export function scope<T>(
 ): Promise<T>
 
 // Scheduling primitives
-export function sleep(ms: number): Promise<void>
-export function yieldNow(): Promise<void>
+export function sleep(ms: number, signal?: AbortSignal): Promise<void>
+export function yieldNow(signal?: AbortSignal): Promise<void>
 
 // Types
 export interface Scope {
@@ -99,6 +99,7 @@ export interface ScopeOptions {
 
 // Errors
 export class TimeoutError extends Error {}
+export class ScopeDoneError extends Error {}
 ```
 
 ### 3.2 `scope(options?, fn)`
@@ -109,13 +110,13 @@ When called with an options object, the scope is configured with timeouts, deadl
 
 The scope returns a promise that resolves with the return value of `fn`, or rejects with the first error thrown by any child task.
 
-### 3.3 `sleep(ms)`
+### 3.3 `sleep(ms, signal?)`
 
-Suspends the current task for the specified number of milliseconds. The sleep is cancellation-aware — if the scope is cancelled while a task is sleeping, the sleep resolves early and the task can observe the cancellation signal.
+Suspends the current task for the specified number of milliseconds. If an `AbortSignal` is passed and it aborts before the timer elapses, `sleep` rejects with the signal's reason. Signals are **explicit** — `sleep` has no ambient signal context. To make a sleep cancellation-aware, pass `s.signal` from the enclosing scope.
 
-### 3.4 `yieldNow()`
+### 3.4 `yieldNow(signal?)`
 
-Yields control back to the scheduler, allowing other tasks in the run queue to execute. This enables cooperative multitasking within a scope. Long-running computational tasks should call `yieldNow` periodically to avoid starving other tasks.
+Yields control back to the scheduler, allowing other tasks in the run queue to execute. If an `AbortSignal` is passed and it aborts before the continuation runs, `yieldNow` rejects with the signal's reason. Long-running computational tasks should call `yieldNow` periodically to avoid starving other tasks.
 
 ### 3.5 `Scope.spawn(fn)`
 
@@ -131,11 +132,11 @@ Resources are cleaned up in **reverse registration order** — the last resource
 
 ### 3.7 `Scope.cancel(reason?)`
 
-Manually cancels the scope. This marks the scope as cancelled, triggers the abort signal, and propagates cancellation to all child tasks and child scopes. An optional reason may be provided for diagnostic purposes. Calling `cancel` multiple times is safe and idempotent. The scope rejects with the cancellation reason.
+Manually cancels the scope. This marks the scope as cancelled, triggers the abort signal, and propagates cancellation to all child tasks and child scopes. An optional reason may be provided for diagnostic purposes. Calling `cancel` multiple times is safe and idempotent. The scope rejects with the cancellation reason — this holds regardless of whether any tasks were active at the time of cancellation. `cancel` called after all tasks have already completed still causes the scope to reject.
 
 ### 3.8 `Scope.done()`
 
-Signals that the scope's work is complete. Like `cancel`, this triggers the abort signal so background tasks can wind down. Unlike `cancel`, the scope resolves normally instead of rejecting. Errors still take precedence — if a task error occurred before `done()`, the scope rejects with that error. If `cancel()` was called before `done()`, cancel wins. Idempotent.
+Signals that the scope's work is complete. Like `cancel`, this triggers the abort signal so background tasks can wind down. Unlike `cancel`, the scope resolves normally instead of rejecting. The signal's reason is a `ScopeDoneError` instance, distinct from a manual `cancel()` — observers checking `s.signal.reason` can distinguish graceful shutdown from cancellation. Errors still take precedence — if a task error occurred before `done()`, the scope rejects with that error. If `cancel()` was called before `done()`, cancel wins. Idempotent.
 
 ### 3.9 `Scope.signal`
 
@@ -711,13 +712,13 @@ await scope(async s => {
   s.spawn(async () => {
     for (let i = 0; i < 1000; i++) {
       heavyComputation(i)
-      await yieldNow()
+      await yieldNow(s.signal)
     }
   })
 })
 ```
 
-Yielding allows the scheduler to interleave other tasks between iterations of the loop.
+Yielding allows the scheduler to interleave other tasks between iterations of the loop. Passing `s.signal` makes the yield cancellation-aware.
 
 ### 18.11 Deadline
 

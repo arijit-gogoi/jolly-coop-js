@@ -10,6 +10,8 @@ Jolly addresses this by introducing a single organizing principle: **all async w
 
 ## Install
 
+Published as `jolly-coop`.
+
 ```bash
 npm install jolly-coop
 ```
@@ -17,16 +19,16 @@ npm install jolly-coop
 ## Quick example
 
 ```js
-import { scope, sleep } from "jolly-coop"
+import { scope } from "jolly-coop"
 
 const results = await scope(async s => {
   const profile = s.spawn(async () => {
-    const res = await fetch("https://api.example.com/profile")
+    const res = await fetch("https://api.example.com/profile", { signal: s.signal })
     return res.json()
   })
 
   const feed = s.spawn(async () => {
-    const res = await fetch("https://api.example.com/feed")
+    const res = await fetch("https://api.example.com/feed", { signal: s.signal })
     return res.json()
   })
 
@@ -36,6 +38,21 @@ const results = await scope(async s => {
 })
 ```
 
+### Cancellation in task bodies
+
+`sleep` and `yieldNow` take an optional `AbortSignal`. To make them cancellation-aware inside a task, pass `s.signal`:
+
+```js
+await scope(async s => {
+  s.spawn(async () => {
+    await sleep(100, s.signal)   // rejects if scope is cancelled
+    await sleep(200, s.signal)   // every await must thread the signal
+  })
+})
+```
+
+Signals are **explicit** in Jolly. There is no ambient signal context — each `sleep`, `yieldNow`, and nested `scope({ signal: s.signal }, ...)` call must be passed the signal it should observe.
+
 ## API
 
 ### Exports
@@ -44,9 +61,10 @@ const results = await scope(async s => {
 |--------|-----------|-------------|
 | `scope` | `(fn) => Promise<T>` | Create a scope, run `fn`, wait for all tasks, clean up |
 | `scope` | `(options, fn) => Promise<T>` | Same, with options (timeout, limit, signal) |
-| `sleep` | `(ms) => Promise<void>` | Cancellation-aware sleep |
-| `yieldNow` | `() => Promise<void>` | Yield to the scheduler, let other tasks run |
+| `sleep` | `(ms, signal?) => Promise<void>` | Cancellation-aware sleep. Pass `s.signal` to observe scope cancellation. |
+| `yieldNow` | `(signal?) => Promise<void>` | Yield to the scheduler. Pass `s.signal` to observe scope cancellation. |
 | `TimeoutError` | class | Thrown when a scope exceeds its timeout |
+| `ScopeDoneError` | class | Signal reason when `s.done()` aborts the scope's signal |
 
 ### Scope
 

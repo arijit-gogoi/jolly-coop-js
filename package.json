@@ -43,10 +43,13 @@
     "bench": "tsx --expose-gc bench/index.ts",
     "bench:vi": "vitest bench",
     "bench:ci": "tsx --expose-gc bench/index.ts --json",
+    "regression": "npm run build && node regression/run.mjs",
+    "regression:baseline": "npm run build && node regression/run.mjs --capture regression/baseline-latest.json",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^4.1.4",
+    "jolly-bench": "file:../jolly-bench",
     "tsup": "^8.0.0",
     "tsx": "^4.21.0",
     "typescript": "^5.4.0",

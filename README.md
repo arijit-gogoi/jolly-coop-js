@@ -80,8 +80,9 @@ Catching after `await t` is too late — the scope will have already started can
 | `scope` | `(options, fn) => Promise<T>` | Same, with options (timeout, limit, signal) |
 | `sleep` | `(ms, signal?) => Promise<void>` | Cancellation-aware sleep. Pass `s.signal` to observe scope cancellation. |
 | `yieldNow` | `(signal?) => Promise<void>` | Yield to the scheduler. Pass `s.signal` to observe scope cancellation. |
-| `TimeoutError` | class | Thrown when a scope exceeds its timeout |
-| `ScopeDoneError` | class | Signal reason when `s.done()` aborts the scope's signal |
+| `TimeoutError` | class | Thrown when a scope exceeds its timeout. Subclass of `ScopeCancelledError`. |
+| `ScopeDoneSignal` | class | Signal reason when `s.done()` aborts the scope's signal. Subclass of `ScopeCancelledError`. Named "Signal" because it marks intentional shutdown, not failure. |
+| `ScopeCancelledError` | class | Parent of `TimeoutError` and `ScopeDoneSignal`. Catch this to handle both structural cancellations in one branch. Has a `.cause: "timeout" \| "done"` discriminator. Manual `cancel(reason)` and external-signal aborts preserve the reason's identity and are NOT wrapped. |
 
 ### Scope
 
@@ -98,10 +99,10 @@ Catching after `await t` is too late — the scope will have already started can
 
 | Option | Type | Description |
 |--------|------|-------------|
-| `timeout` | `number` | Milliseconds before the scope times out |
-| `deadline` | `number` | Absolute timestamp (`Date.now()` based) |
-| `limit` | `number` | Max concurrent tasks |
-| `signal` | `AbortSignal` | External signal to cancel the scope |
+| `timeout` | `number` | **Relative** duration in ms. Scope rejects with `TimeoutError` if not settled in time. |
+| `deadline` | `number` | **Absolute** timestamp (`Date.now()`-based). Composable — compute once, pass down. |
+| `limit` | `number` | Max **concurrently running** tasks. Excess `spawn` calls queue internally (FIFO). See [Backpressure](#backpressure). |
+| `signal` | `AbortSignal` | External signal. If aborted, scope rejects with `signal.reason` (identity preserved). Not auto-inherited by nested scopes — see [Nested scopes](#nested-scopes). |
 
 ### Task
 
@@ -111,6 +112,95 @@ Catching after `await t` is too late — the scope will have already started can
 | `state` | `string` | `"running"`, `"completed"`, `"failed"`, or `"cancelled"` |
 
 Tasks implement `PromiseLike<T>` and can be awaited.
+
+## Contract
+
+The load-bearing behaviors, in one place. These appear as JSDoc on the public types (hover in your IDE); this section is the prose version for skimming.
+
+**Time bounds.** `timeout` is a **relative** duration in ms (`timeout: 5000` = "finish within 5s"). `deadline` is an **absolute** `Date.now()`-based timestamp (`deadline: Date.now() + 5000` = "finish before timestamp X"). Use `deadline` when you need the same end-time to apply to nested scopes — compute once, pass down.
+
+**`spawn` is non-blocking.** `spawn(fn)` returns immediately with a `Task<T>` handle, even when the scope is at its `limit`. Excess tasks queue internally in FIFO order. Queued tasks honor cancellation — cancelling the scope transitions them to `"cancelled"` without ever executing.
+
+**`done()` resolves; `cancel()` rejects.** `s.done()` marks the scope as intentionally finished: the scope's promise **resolves normally** (assuming no prior task errors), and `s.signal` aborts with a `ScopeDoneSignal` reason so cooperating tasks can distinguish graceful shutdown from cancellation. `s.cancel(reason)` **rejects** the scope with `reason` (identity preserved — `err === reason` after catch).
+
+**Error identity is preserved.** Manual `cancel(reason)` and external-signal aborts pass the reason through unchanged. Only structural cancellations (timeout, done) synthesize their own reason — these are subclasses of `ScopeCancelledError`:
+
+```js
+try { await scope(...) }
+catch (err) {
+  if (err instanceof TimeoutError) { /* scope timed out */ }
+  else if (err instanceof ScopeCancelledError) { /* unreachable — only timeout + done, and done doesn't throw */ }
+  else { /* err is exactly what was passed to cancel(), or external signal.reason */ }
+}
+```
+
+**LIFO resource cleanup.** Resources dispose in reverse registration order on scope exit, regardless of outcome. Disposer errors are contained.
+
+**Fail-fast on task errors.** An uncaught throw from a `spawn`'d task body cancels the scope immediately. To recover from an expected failure, catch inside the task body and return an error-as-value (`{ ok, value | error }`). Catching after `await task` is too late.
+
+## Backpressure
+
+`scope({ limit })` enforces max **concurrently running** tasks, but `spawn` is non-blocking — under the limit, excess tasks queue internally. For sources like message queues or BFS frontiers, a naive driver pre-schedules the entire input:
+
+```js
+// Pre-schedules every URL — internal queue grows unbounded
+await scope({ limit: 10 }, async pool => {
+  while (!urls.isEmpty()) {
+    pool.spawn(() => fetch(urls.pop()))
+  }
+})
+```
+
+For real backpressure — don't pull from the source faster than the pool processes — guard the driver loop:
+
+```js
+await scope({ limit: 10 }, async pool => {
+  while (!urls.isEmpty()) {
+    while (pool.active >= 10) await sleep(5, pool.signal)
+    pool.spawn(() => fetch(urls.pop()))
+  }
+})
+```
+
+See [`examples/library/04-bounded-bfs-with-backpressure.mjs`](examples/library/04-bounded-bfs-with-backpressure.mjs) for a worked example with a BFS frontier.
+
+## Nested scopes
+
+Nested scopes do **not** automatically inherit the parent's signal. You must pass it explicitly:
+
+```js
+await scope(async parent => {
+  parent.spawn(async () => {
+    // ✗ Silent bug: parent cancellation doesn't reach this scope
+    await scope(async inner => {
+      inner.spawn(async () => await sleep(1000, inner.signal))
+    })
+
+    // ✓ Correct: parent signal threaded into child
+    await scope({ signal: parent.signal }, async inner => {
+      inner.spawn(async () => await sleep(1000, inner.signal))
+    })
+  })
+})
+```
+
+This is deliberate. Ambient signal context was considered and rejected — a prior implementation lost the signal across `await` boundaries because of how `try/finally` around async calls interacts with the microtask queue. Explicit threading makes cancellation propagation visible at the call site and survives every code transformation.
+
+If you forget, the failure mode is silent: the inner scope runs to completion ignoring parent cancellation. Treat `scope({...}, ...)` inside a task body as always needing `signal: parent.signal`.
+
+## Patterns
+
+Self-contained examples in the repo, grouped by domain:
+
+- Backend: [`examples/backend/`](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/backend) — parallel fetch, rate-limited pipeline, API server simulation
+- Frontend: [`examples/frontend/`](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/frontend) — dashboard loader, search with cancellation, component lifecycle
+- CLI: [`examples/cli/`](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/cli) — file hash, downloader, build system
+- Data pipelines: [`examples/data-pipeline/`](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/data-pipeline) — transform batch, fan-out/fan-in, streaming ETL
+- Library authors: [`examples/library/`](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/library) — retry with backoff, async pool, pub/sub with lifecycle, **BFS with backpressure**
+- Patterns: [`examples/patterns/`](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/patterns) — first-to-resolve, bounded channel, errors-as-values
+- Other: [ai-ml](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/ai-ml), [gamedev](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/gamedev), [testing](https://github.com/arijit-gogoi/jolly-coop-js/tree/main/examples/testing)
+
+All 27 examples run end-to-end: `npm run examples` (in a checkout of this repo).
 
 ## Runtime guarantees
 

@@ -98,8 +98,11 @@ export interface ScopeOptions {
 }
 
 // Errors
-export class TimeoutError extends Error {}
-export class ScopeDoneError extends Error {}
+export class ScopeCancelledError extends Error {
+  readonly cause: "timeout" | "done"
+}
+export class TimeoutError extends ScopeCancelledError {}    // cause: "timeout"
+export class ScopeDoneSignal extends ScopeCancelledError {} // cause: "done"
 ```
 
 ### 3.2 `scope(options?, fn)`
@@ -136,7 +139,7 @@ Manually cancels the scope. This marks the scope as cancelled, triggers the abor
 
 ### 3.8 `Scope.done()`
 
-Signals that the scope's work is complete. Like `cancel`, this triggers the abort signal so background tasks can wind down. Unlike `cancel`, the scope resolves normally instead of rejecting. The signal's reason is a `ScopeDoneError` instance, distinct from a manual `cancel()` — observers checking `s.signal.reason` can distinguish graceful shutdown from cancellation. Errors still take precedence — if a task error occurred before `done()`, the scope rejects with that error. If `cancel()` was called before `done()`, cancel wins. Idempotent.
+Signals that the scope's work is complete. Like `cancel`, this triggers the abort signal so background tasks can wind down. Unlike `cancel`, the scope resolves normally instead of rejecting. The signal's reason is a `ScopeDoneSignal` instance (a subclass of `ScopeCancelledError` with `cause === "done"`), distinct from a manual `cancel()` — observers checking `s.signal.reason` can distinguish graceful shutdown from cancellation. Errors still take precedence — if a task error occurred before `done()`, the scope rejects with that error. If `cancel()` was called before `done()`, cancel wins. Idempotent.
 
 ### 3.9 `Scope.signal`
 
@@ -157,7 +160,11 @@ Configuration for a scope's behavior:
 
 ### 3.11 `TimeoutError`
 
-A dedicated error class thrown when a scope exceeds its configured timeout or deadline. Extends the built-in `Error` class.
+A dedicated error class thrown when a scope exceeds its configured timeout or deadline. Subclass of `ScopeCancelledError` with `cause === "timeout"`.
+
+### 3.12 `ScopeCancelledError`
+
+Parent class for the errors Jolly itself creates when cancelling a scope for a structural reason (`TimeoutError`, `ScopeDoneSignal`). Carries a `cause: "timeout" | "done"` discriminator so callers can branch on the kind of cancellation. Manual `cancel(reason)` and external-signal aborts do **not** wrap the reason — they preserve identity, so `ScopeCancelledError` appears only when the runtime itself synthesized a cancellation reason.
 
 ---
 
@@ -230,6 +237,32 @@ The scope's `signal` property is a standard `AbortSignal`. This means Jolly's ca
 - Any third-party API that accepts an `AbortSignal`
 
 No custom cancellation protocol is needed. Jolly builds on the platform's existing mechanism.
+
+### 5.5 Nested Scopes Do Not Auto-Inherit the Parent Signal
+
+A nested `scope(...)` call inside a task body creates an independent cancellation boundary. It does **not** automatically inherit the enclosing scope's `AbortSignal`. To propagate parent cancellation into a child scope, the caller must pass `{ signal: parent.signal }` explicitly:
+
+```typescript
+await scope(async parent => {
+  parent.spawn(async () => {
+    await scope({ signal: parent.signal }, async inner => {
+      // Parent cancellation now propagates into this scope.
+    })
+  })
+})
+```
+
+**Design rationale.** A prior implementation used an ambient signal context (a module-scoped variable set before `task.fn()` and restored after). It failed because `try/finally` around an `async` call restores the context at the first `await` (when `fn` returns a promise), not when the async body finishes. Every `sleep`/`yieldNow`/nested-`scope` call *after* the first `await` in a task body saw a null signal and silently ignored cancellation. The bug was invisible at type-check time and only surfaced as "why doesn't my cancellation propagate after two awaits?"
+
+Explicit signal threading was chosen over three alternatives:
+
+- **AsyncLocalStorage**: Node-only. Breaks browser portability (a v1 target).
+- **Monkey-patch `Promise.prototype.then`**: fragile; affects every promise in the process.
+- **Track parent-child scope relationships internally**: violates the "no per-task data structures" architectural constraint (CLAUDE.md) and adds runtime cost to every nested scope for a feature users can express in one parameter.
+
+Explicit threading makes cancellation propagation visible at the call site. It survives refactors that insert intermediate `await`s. It fails noisily (when paired with the expectation of cancellation) rather than silently. The minor verbosity is the design paying its own correctness tax.
+
+Implementations may provide lint-level detection of unthreaded nested scopes, but the runtime does not error on them — a nested scope without inherited signal is a valid, independent lifetime.
 
 ---
 

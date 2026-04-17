@@ -17,9 +17,9 @@ Not a unit test. Not a microbenchmark. This is integration-level: real concurren
 
 `jolly-bench` must be invokable. In order of preference, the runner picks:
 
-1. **`node_modules/.bin/jolly-bench`** — installed as a devDependency of this repo (`npm install --save-dev jolly-bench`). Preferred: version is locked in `package-lock.json`, so baseline and candidate runs use the same binary.
-2. **`../jolly-bench/dist/cli.js`** — sibling repo checkout (`C:\Users\hp\claude-projects\jolly-bench`). Useful during co-development.
-3. **`npx jolly-bench`** — fetched from npm on demand. Works but unpinned.
+1. **`node_modules/.bin/jolly-bench`** — already installed as a devDependency (`jolly-bench@^0.1.0`, locked in `package-lock.json`). Preferred: baseline and candidate runs use the same binary. This is the default path after `npm install` in a fresh clone.
+2. **`../jolly-bench/dist/cli.js`** — sibling repo checkout (`C:\Users\hp\claude-projects\jolly-bench`). Useful during co-development of jolly-coop and jolly-bench simultaneously.
+3. **`npx jolly-bench`** — fetched from npm on demand. Works but unpinned, so use only as a last resort.
 
 ## Baseline format
 
@@ -57,7 +57,7 @@ The newest file is always the one just written, so the current run is never at r
 npm run regression
 ```
 
-This runs `scope-stress.mjs` for 30s with 50 VUs, then diffs against `baseline-latest.ndjson`. Exits 0 if within ±10% on p50/p95/p99; exits 1 on regression.
+This runs `scope-stress.mjs` for 30s with 50 VUs, then diffs against `baseline-latest.json`. Exits 0 if within ±10% on p50/p95/p99; exits 1 on regression.
 
 ### Capture a new baseline (after releasing a jolly-coop version)
 
@@ -65,15 +65,17 @@ This runs `scope-stress.mjs` for 30s with 50 VUs, then diffs against `baseline-l
 npm run regression:baseline
 ```
 
-Overwrites `baseline-latest.ndjson`. Commit the new baseline with the release tag.
+Overwrites `baseline-latest.json` with a fresh summary. Commit the new baseline with the release tag.
 
 ### Ad-hoc runs with custom bench options
 
 ```sh
 node regression/run.mjs --duration 60s --concurrency 100
-node regression/run.mjs --baseline regression/baseline-v0.3.3.ndjson
-node regression/run.mjs --capture regression/baseline-v0.3.4.ndjson
+node regression/run.mjs --baseline regression/baseline-v0.3.3.json
+node regression/run.mjs --capture regression/baseline-v0.3.4.json
 ```
+
+Baseline paths can also end in `.ndjson` — the diff tool accepts both. Use `.json` for small committed summaries (~300 B) and `.ndjson` only for ad-hoc raw comparisons.
 
 ## Interpreting output
 

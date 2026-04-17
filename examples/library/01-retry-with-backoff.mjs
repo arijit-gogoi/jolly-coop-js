@@ -8,19 +8,22 @@
 import { scope, sleep } from "../../dist/index.js"
 
 // The reusable utility a library author would export.
-// Threads s.signal through sleep so parent cancellation interrupts backoff.
+// Catches inside the task body so a failed attempt does not fail-fast
+// the scope; threads s.signal through sleep so parent cancellation
+// interrupts backoff.
 async function retry(s, fn, { maxAttempts = 3, baseDelay = 100 } = {}) {
   let lastError
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      return await s.spawn(fn)
-    } catch (err) {
-      lastError = err
-      if (attempt < maxAttempts) {
-        const delay = baseDelay * Math.pow(2, attempt - 1)
-        console.log(`  attempt ${attempt} failed: ${err.message}, retrying in ${delay}ms`)
-        await sleep(delay, s.signal)
-      }
+    const outcome = await s.spawn(async () => {
+      try { return { ok: true, value: await fn() } }
+      catch (err) { return { ok: false, error: err } }
+    })
+    if (outcome.ok) return outcome.value
+    lastError = outcome.error
+    if (attempt < maxAttempts) {
+      const delay = baseDelay * Math.pow(2, attempt - 1)
+      console.log(`  attempt ${attempt} failed: ${lastError.message}, retrying in ${delay}ms`)
+      await sleep(delay, s.signal)
     }
   }
   throw lastError

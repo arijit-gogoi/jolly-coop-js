@@ -255,6 +255,29 @@ This is an intentional design choice. Aggregating errors from cancelled tasks wo
 
 When a task fails and the scope cancels sibling tasks, some of those siblings may throw errors during their cancellation (for example, an abort error from `fetch`). These cancellation-induced errors are secondary and are suppressed by the runtime. Only the original causal error surfaces.
 
+### 6.4 Handling Expected Failures
+
+Any uncaught throw from a task body fails the scope. Fail-fast is unconditional — the runtime does not distinguish "observed" from "unobserved" failures, and does not defer cancellation to see whether the user will `await` the task. A task whose rejection was meant to be handled locally must handle it inside the task body:
+
+```typescript
+// Wrong — the throw fails the scope before the await sees it:
+await scope(async s => {
+  const t = s.spawn(async () => { throw new Error("fail") })
+  try { await t } catch { /* too late; scope is already cancelling */ }
+})
+
+// Right — handle inside the task body:
+await scope(async s => {
+  const t = s.spawn(async () => {
+    try { await risky() } catch (err) { return { error: err } }
+  })
+  const result = await t
+  if (result?.error) { /* handle */ }
+})
+```
+
+This keeps the scope's error model deterministic and free of timing dependencies. Patterns that need independent-failure semantics (retry loops, batch runners) must return error-as-value from the task body rather than throw.
+
 ---
 
 ## 7. Concurrency Limits

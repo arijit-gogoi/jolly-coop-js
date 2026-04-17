@@ -53,6 +53,23 @@ await scope(async s => {
 
 Signals are **explicit** in Jolly. There is no ambient signal context — each `sleep`, `yieldNow`, and nested `scope({ signal: s.signal }, ...)` call must be passed the signal it should observe.
 
+### Handling expected failures
+
+Any uncaught throw from a task body fails the scope (fail-fast). To handle an expected failure without cancelling siblings, catch it inside the task body and return a result:
+
+```js
+await scope(async s => {
+  const t = s.spawn(async () => {
+    try { return { ok: true, value: await risky() } }
+    catch (err) { return { ok: false, error: err } }
+  })
+  const r = await t
+  if (!r.ok) { /* handle locally */ }
+})
+```
+
+Catching after `await t` is too late — the scope will have already started cancelling.
+
 ## API
 
 ### Exports

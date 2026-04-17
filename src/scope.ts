@@ -141,18 +141,16 @@ class ScopeImpl {
       task.transition("cancelled")
       task.reject(this.cancelReason)
     } else {
+      // Fail-fast: first task error becomes the scope's rejection reason.
+      // Siblings are cancelled. To handle an expected failure, catch it
+      // inside the task body.
       task.transition("failed")
       task.reject(err)
-      // Defer scope cancellation — only cancel if error wasn't observed
-      Promise.resolve().then(() => {
-        if (!task.observed) {
-          if (!this.hasError) {
-            this.hasError = true
-            this.firstError = err
-          }
-          this.cancel(err)
-        }
-      })
+      if (!this.hasError) {
+        this.hasError = true
+        this.firstError = err
+      }
+      this.cancel(err)
     }
   }
 

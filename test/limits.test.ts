@@ -217,18 +217,20 @@ test("cancel drains limit queue without running queued tasks", async () => {
   expect(ran).toEqual([1])
 })
 
-test("slot freed by observed failed task allows queued task to run", async () => {
+test("slot freed by locally-handled failure allows queued task to run", async () => {
+  // To handle an expected failure, catch inside the task body.
+  // A bare throw triggers fail-fast and cancels the scope.
   let secondRan = false
+  let caught = false
   await scope({ limit: 1 }, async s => {
-    const t = s.spawn(async () => {
-      throw new Error("fail")
+    s.spawn(async () => {
+      try { throw new Error("fail") } catch { caught = true }
     })
     s.spawn(async () => {
       secondRan = true
     })
-    // Observe the error so it doesn't cancel the scope
-    await expect(t).rejects.toThrow("fail")
   })
+  expect(caught).toBe(true)
   expect(secondRan).toBe(true)
 })
 

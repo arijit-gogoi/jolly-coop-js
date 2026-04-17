@@ -30,15 +30,18 @@ test("cancel interrupts sleep after first await in task body", async () => {
 })
 
 test("cancel interrupts third sleep in task body", async () => {
+  // Parent waits long enough that the task has cleared the first two
+  // sleeps and is in its third before cancel fires. Windows timer
+  // granularity (~15ms) means short delays are noisy; give headroom.
   let reached = 0
   await expect(
     scope(async s => {
       s.spawn(async () => {
         await sleep(5, s.signal); reached = 1
         await sleep(5, s.signal); reached = 2
-        await sleep(500, s.signal); reached = 3
+        await sleep(1000, s.signal); reached = 3
       })
-      await sleep(50)
+      await sleep(200)
       s.cancel()
     })
   ).rejects.toBeDefined()

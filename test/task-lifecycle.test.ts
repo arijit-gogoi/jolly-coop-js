@@ -2,12 +2,18 @@ import { expect, test } from "vitest"
 import { scope, sleep, yieldNow } from "../src/index.js"
 
 test("task rejection propagates to await", async () => {
-  await scope(async s => {
-    const t = s.spawn(async () => {
-      throw new Error("boom")
+  // Fail-fast: the task error cancels the scope. Awaiting the task
+  // itself still yields the original error.
+  let observed: unknown = null
+  await expect(
+    scope(async s => {
+      const t = s.spawn(async () => {
+        throw new Error("boom")
+      })
+      try { await t } catch (e) { observed = e }
     })
-    await expect(t).rejects.toThrow("boom")
-  })
+  ).rejects.toThrow("boom")
+  expect((observed as Error).message).toBe("boom")
 })
 
 test("task state becomes completed", async () => {
@@ -19,13 +25,17 @@ test("task state becomes completed", async () => {
 })
 
 test("task state becomes failed", async () => {
-  await scope(async s => {
-    const t = s.spawn(async () => {
-      throw new Error("fail")
+  let taskState: string | null = null
+  await expect(
+    scope(async s => {
+      const t = s.spawn(async () => {
+        throw new Error("fail")
+      })
+      try { await t } catch {}
+      taskState = t.state
     })
-    await expect(t).rejects.toThrow()
-    expect(t.state).toBe("failed")
-  })
+  ).rejects.toThrow()
+  expect(taskState).toBe("failed")
 })
 
 test("task state becomes cancelled", async () => {
@@ -132,13 +142,21 @@ test("task cancelled before execution does not run", async () => {
 })
 
 test("task failure state set once", async () => {
-  await scope(async s => {
-    const t = s.spawn(async () => {
-      throw new Error("fail")
+  let stateAfterAwait: string | null = null
+  let stateAfterSecondAwait: string | null = null
+  await expect(
+    scope(async s => {
+      const t = s.spawn(async () => {
+        throw new Error("fail")
+      })
+      try { await t } catch {}
+      stateAfterAwait = t.state
+      try { await t } catch {}
+      stateAfterSecondAwait = t.state
     })
-    await expect(t).rejects.toThrow()
-    expect(t.state).toBe("failed")
-  })
+  ).rejects.toThrow()
+  expect(stateAfterAwait).toBe("failed")
+  expect(stateAfterSecondAwait).toBe("failed")
 })
 
 test("task then behaves like Promise", async () => {
@@ -158,12 +176,16 @@ test("task chaining works", async () => {
 })
 
 test("task propagates error through then", async () => {
-  await scope(async s => {
-    const t = s.spawn(async () => {
-      throw new Error("fail")
+  let chainedError: unknown = null
+  await expect(
+    scope(async s => {
+      const t = s.spawn(async () => {
+        throw new Error("fail")
+      })
+      try { await t.then(() => {}) } catch (e) { chainedError = e }
     })
-    await expect(t.then(() => {})).rejects.toThrow("fail")
-  })
+  ).rejects.toThrow("fail")
+  expect((chainedError as Error).message).toBe("fail")
 })
 
 test("task can await another task", async () => {

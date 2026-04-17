@@ -18,7 +18,7 @@ Not a unit test. Not a microbenchmark. This is integration-level: real concurren
 `jolly-bench` must be invokable. In order of preference, the runner picks:
 
 1. **`node_modules/.bin/jolly-bench`** — already installed as a devDependency (`jolly-bench@^0.1.0`, locked in `package-lock.json`). Preferred: baseline and candidate runs use the same binary. This is the default path after `npm install` in a fresh clone.
-2. **`../jolly-bench/dist/cli.js`** — sibling repo checkout (`C:\Users\hp\claude-projects\jolly-bench`). Useful during co-development of jolly-coop and jolly-bench simultaneously.
+2. **`../jolly-bench/dist/cli.js`** — a sibling checkout of the jolly-bench repo next to this one. Resolved relative to the jolly-coop-js repo root, so it works on any OS / any clone location. Useful during co-development of jolly-coop and jolly-bench simultaneously; otherwise ignore.
 3. **`npx jolly-bench`** — fetched from npm on demand. Works but unpinned, so use only as a last resort.
 
 ## Baseline format

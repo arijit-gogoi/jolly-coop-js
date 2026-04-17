@@ -31,12 +31,13 @@ function createEventTarget() {
 // --- Components ---
 
 async function NotificationBell(parentScope) {
-  // Nested scope: bell has its own lifecycle within the page
-  await scope(async s => {
+  // Nested scope: bell has its own lifecycle within the page.
+  // Inherits parent signal so parent cancellation propagates here.
+  await scope({ signal: parentScope.signal }, async s => {
     let count = 0
 
     // Resource: polling interval — auto-cleared when scope exits
-    const poller = await s.resource(
+    await s.resource(
       createInterval(() => { count++; emit(`bell: poll #${count}`) }, 30),
       (p) => { p.clear(); emit("bell: poller cleaned up") }
     )
@@ -50,30 +51,34 @@ async function NotificationBell(parentScope) {
 
     // Simulate receiving notifications
     s.spawn(async () => {
-      await sleep(40)
+      await sleep(40, s.signal)
       bus.emit("notification", "new message")
-      await sleep(40)
+      await sleep(40, s.signal)
       bus.emit("notification", "friend request")
     })
 
-    // Keep alive until parent cancels
-    while (!s.signal.aborted) {
-      await sleep(20)
+    // Keep alive until parent cancels — thread signal so sleep rejects on abort
+    try {
+      while (!s.signal.aborted) {
+        await sleep(20, s.signal)
+      }
+    } catch {
+      // Expected: sleep rejects when signal aborts
     }
   })
 }
 
 async function DataTable(parentScope, items) {
-  await scope({ timeout: 500 }, async s => {
+  await scope({ signal: parentScope.signal, timeout: 500 }, async s => {
     emit(`table: loading ${items.length} rows`)
 
     // Spawn concurrent row processors with concurrency limit
-    await scope({ limit: 3 }, async batchScope => {
+    await scope({ signal: s.signal, limit: 3 }, async batchScope => {
       for (const item of items) {
         batchScope.spawn(async () => {
-          await sleep(10 + Math.random() * 20) // simulate render
+          await sleep(10 + Math.random() * 20, batchScope.signal) // simulate render
           emit(`table: rendered row ${item}`)
-          await yieldNow() // stay responsive
+          await yieldNow(batchScope.signal) // stay responsive
         })
       }
     })

@@ -31,10 +31,10 @@ function createBroker() {
 }
 
 async function createSubscriber(parentScope, broker, name, topics, handler, { bufferSize = 100, concurrency = 3 } = {}) {
-  // Each subscriber is a nested scope with its own lifecycle
-  return scope(async s => {
+  // Each subscriber is a nested scope — inherit parent signal so
+  // broker shutdown cancels subscribers.
+  return scope({ signal: parentScope.signal }, async s => {
     const buffer = []
-    let processing = false
 
     // Resource: topic subscriptions — auto-removed on scope exit
     for (const topic of topics) {
@@ -49,27 +49,32 @@ async function createSubscriber(parentScope, broker, name, topics, handler, { bu
     emit(`${name}: subscribed to [${topics.join(", ")}]`)
 
     // Resource: message processing state
+    const state = { processed: 0 }
     await s.resource(
-      { processed: 0 },
-      (state) => emit(`${name}: processed ${state.processed} messages total`)
+      state,
+      (st) => emit(`${name}: processed ${st.processed} messages total`)
     )
 
-    // Process messages in batches with concurrency limit
-    const state = { processed: 0 }
-    while (!s.signal.aborted) {
-      if (buffer.length > 0) {
-        const batch = buffer.splice(0, concurrency)
-        await scope({ limit: concurrency }, async batchScope => {
-          for (const item of batch) {
-            batchScope.spawn(async () => {
-              await handler(name, item.topic, item.msg)
-              state.processed++
-              await yieldNow()
-            })
-          }
-        })
+    // Process messages in batches with concurrency limit. Signal threaded
+    // through sleep so poll loop exits when parent cancels.
+    try {
+      while (!s.signal.aborted) {
+        if (buffer.length > 0) {
+          const batch = buffer.splice(0, concurrency)
+          await scope({ signal: s.signal, limit: concurrency }, async batchScope => {
+            for (const item of batch) {
+              batchScope.spawn(async () => {
+                await handler(name, item.topic, item.msg)
+                state.processed++
+                await yieldNow(batchScope.signal)
+              })
+            }
+          })
+        }
+        await sleep(10, s.signal) // poll interval
       }
-      await sleep(10) // poll interval
+    } catch {
+      // Expected: sleep rejects when scope signal aborts
     }
   })
 }

@@ -47,9 +47,10 @@ async function suite(name, { concurrency = 3, timeout = 2000 } = {}, fn) {
             const testTimeout = test.opts.timeout || 500
             const testStart = performance.now()
             try {
-              // Each test gets its own scope (isolation + timeout)
+              // Each test gets its own scope (isolation + timeout).
+              // Pass signal into test fn so awaits inside honor the timeout.
               await scope({ timeout: testTimeout }, async testScope => {
-                await testScope.spawn(test.fn)
+                await testScope.spawn(() => test.fn(testScope.signal))
               })
               const duration = (performance.now() - testStart).toFixed(0)
               results.push({ suite: name, name: test.name, status: "pass", duration })
@@ -155,8 +156,8 @@ const allResults = await scope(async s => {
       await sleep(20) // simulate payment gateway
     })
 
-    ctx.test("handles timeout", async () => {
-      await sleep(9999) // this will timeout
+    ctx.test("handles timeout", async (sig) => {
+      await sleep(9999, sig) // this will timeout
     }, { timeout: 30 })
 
     ctx.test("can cancel order", async () => {

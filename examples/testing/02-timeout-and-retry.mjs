@@ -7,12 +7,14 @@
 
 import { scope, sleep, yieldNow } from "../../dist/index.js"
 
+// Test function signature: (signal) => Promise<void> — thread signal through
+// awaits in the test body so timeout actually interrupts long operations.
 async function runTest(name, fn, { timeout = 500, retries = 0 } = {}) {
   let lastError
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       await scope({ timeout }, async s => {
-        await s.spawn(fn)
+        await s.spawn(() => fn(s.signal))
       })
       return { name, status: "pass", attempts: attempt + 1 }
     } catch (err) {
@@ -30,9 +32,9 @@ async function runTest(name, fn, { timeout = 500, retries = 0 } = {}) {
 let flakyCallCount = 0
 
 const tests = [
-  { name: "fast test",    fn: async () => { await sleep(10) },                             opts: {} },
-  { name: "slow test",    fn: async () => { await sleep(50) },                             opts: {} },
-  { name: "timeout test", fn: async () => { await sleep(9999) },                           opts: { timeout: 50 } },
+  { name: "fast test",    fn: async (sig) => { await sleep(10, sig) },                             opts: {} },
+  { name: "slow test",    fn: async (sig) => { await sleep(50, sig) },                             opts: {} },
+  { name: "timeout test", fn: async (sig) => { await sleep(9999, sig) },                           opts: { timeout: 50 } },
   { name: "flaky test",   fn: async () => { flakyCallCount++; if (flakyCallCount < 3) throw new Error("flaky!") }, opts: { retries: 3 } },
   { name: "error test",   fn: async () => { throw new Error("intentional failure") },      opts: { retries: 1 } },
 ]

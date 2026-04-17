@@ -2,7 +2,7 @@
 // Each test mirrors the spec code as closely as possible with mock implementations.
 
 import { describe, it, expect } from "vitest"
-import { scope, sleep, yieldNow, TimeoutError } from "../src/index.js"
+import { scope, sleep, yieldNow, TimeoutError, DeadlineError } from "../src/index.js"
 
 // --- Mocks ---
 
@@ -218,5 +218,5 @@ it("18.11 deadline", async () => {
         s.spawn(async () => { await sleep(5000, s.signal) })
       }
     )
-  ).rejects.toThrow(TimeoutError)
+  ).rejects.toThrow(DeadlineError)
 })

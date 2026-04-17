@@ -1,13 +1,16 @@
 import type { Scope, ScopeOptions, Task } from "./types.js"
 import { TaskImpl } from "./task.js"
-import { TimeoutError, ScopeDoneSignal } from "./errors.js"
+import { TimeoutError, DeadlineError, ScopeDoneSignal } from "./errors.js"
 import { schedule } from "./scheduler.js"
 
 class ScopeImpl {
   private abortController = new AbortController()
   private pendingCount = 0
+  private completedCount = 0
+  private failedCount = 0
+  private cancelledCount = 0
   private resources: Array<{ value: unknown; disposer: (value: any) => Promise<void> | void }> = []
-  private cancelled = false
+  private isCancelled = false
   private firstError: unknown = undefined
   private hasError = false
   private _doneGracefully = false
@@ -53,6 +56,18 @@ class ScopeImpl {
     return this.pendingCount
   }
 
+  get completed(): number {
+    return this.completedCount
+  }
+
+  get failed(): number {
+    return this.failedCount
+  }
+
+  get cancelled(): number {
+    return this.cancelledCount
+  }
+
   private get cancelReason(): unknown {
     return this.abortController.signal.reason ?? new Error("Scope cancelled")
   }
@@ -62,8 +77,9 @@ class ScopeImpl {
     task._scope = this
     this.pendingCount++
 
-    if (this.cancelled) {
+    if (this.isCancelled) {
       task.transition("cancelled")
+      this.cancelledCount++
       task.reject(this.cancelReason)
       this.taskDone()
       return task as unknown as Task<T>
@@ -87,8 +103,9 @@ class ScopeImpl {
   /** @internal — called by TaskImpl._run() via scheduler */
   executeTask(task: TaskImpl<unknown>): void {
     // If scope was cancelled before this task runs
-    if (this.cancelled && task.internalState === "created") {
+    if (this.isCancelled && task.internalState === "created") {
       task.transition("cancelled")
+      this.cancelledCount++
       task.reject(this.cancelReason)
       if (this.limit !== undefined) {
         this.runningCount--
@@ -126,25 +143,29 @@ class ScopeImpl {
 
   private handleTaskSuccess(task: TaskImpl<unknown>, value: unknown): void {
     if (task.internalState !== "running") return
-    if (this.cancelled) {
+    if (this.isCancelled) {
       task.transition("cancelled")
+      this.cancelledCount++
       task.reject(this.cancelReason)
     } else {
       task.transition("completed")
+      this.completedCount++
       task.resolve(value)
     }
   }
 
   private handleTaskError(task: TaskImpl<unknown>, err: unknown): void {
     if (task.internalState !== "running") return
-    if (this.cancelled) {
+    if (this.isCancelled) {
       task.transition("cancelled")
+      this.cancelledCount++
       task.reject(this.cancelReason)
     } else {
       // Fail-fast: first task error becomes the scope's rejection reason.
       // Siblings are cancelled. To handle an expected failure, catch it
       // inside the task body.
       task.transition("failed")
+      this.failedCount++
       task.reject(err)
       if (!this.hasError) {
         this.hasError = true
@@ -165,10 +186,11 @@ class ScopeImpl {
   private dequeueNext(): void {
     while (this.limitQueue.length > 0) {
       const next = this.limitQueue.shift()!
-      if (this.cancelled && next.internalState === "created") {
+      if (this.isCancelled && next.internalState === "created") {
         next.transition("cancelled")
+        this.cancelledCount++
         next.reject(this.cancelReason)
-          this.taskDone()
+        this.taskDone()
         continue
       }
       // FIX 1: Increment runningCount at dequeue time
@@ -187,8 +209,8 @@ class ScopeImpl {
   }
 
   cancel(reason?: unknown): void {
-    if (this.cancelled) return
-    this.cancelled = true
+    if (this.isCancelled) return
+    this.isCancelled = true
     this.abortController.abort(reason ?? new Error("Scope cancelled"))
 
     // Cancel all queued tasks immediately
@@ -196,14 +218,15 @@ class ScopeImpl {
       const task = this.limitQueue.shift()!
       if (task.internalState === "created") {
         task.transition("cancelled")
+        this.cancelledCount++
         task.reject(this.cancelReason)
-          this.taskDone()
+        this.taskDone()
       }
     }
   }
 
   done(): void {
-    if (this.cancelled) return
+    if (this.isCancelled) return
     this._doneGracefully = true
     this.cancel(new ScopeDoneSignal())
   }
@@ -240,19 +263,26 @@ class ScopeImpl {
       }
     }
 
-    // Set up timeout/deadline
-    const timeout = this.options.deadline !== undefined
+    // Set up timeout/deadline.
+    // Precedence: `deadline` wins over `timeout` if both are set.
+    // Error type reflects which option caused the fire: `deadline` → DeadlineError,
+    // `timeout` → TimeoutError. Both extend ScopeCancelledError.
+    const boundMs = this.options.deadline !== undefined
       ? Math.max(0, this.options.deadline - Date.now())
       : this.options.timeout
+    const boundKind: "deadline" | "timeout" | null =
+      this.options.deadline !== undefined ? "deadline"
+      : this.options.timeout !== undefined ? "timeout"
+      : null
 
-    if (timeout !== undefined) {
+    if (boundMs !== undefined) {
       this.timeoutTimer = setTimeout(() => {
         if (!this.hasError) {
           this.hasError = true
-          this.firstError = new TimeoutError()
+          this.firstError = boundKind === "deadline" ? new DeadlineError() : new TimeoutError()
         }
         this.cancel(this.firstError)
-      }, timeout)
+      }, boundMs)
     }
 
     const proxy = {
@@ -265,6 +295,9 @@ class ScopeImpl {
 
     Object.defineProperty(proxy, "signal", { get: () => this.signal, enumerable: true })
     Object.defineProperty(proxy, "active", { get: () => this.active, enumerable: true })
+    Object.defineProperty(proxy, "completed", { get: () => this.completed, enumerable: true })
+    Object.defineProperty(proxy, "failed", { get: () => this.failed, enumerable: true })
+    Object.defineProperty(proxy, "cancelled", { get: () => this.cancelled, enumerable: true })
 
     let rootResult: T | undefined
 
@@ -301,7 +334,7 @@ class ScopeImpl {
     if (this.hasError) {
       throw this.firstError
     }
-    if (this.cancelled && !this._doneGracefully) {
+    if (this.isCancelled && !this._doneGracefully) {
       throw this.cancelReason
     }
     return rootResult as T

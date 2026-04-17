@@ -28,6 +28,15 @@ export interface Scope {
    * Uncaught throws from `fn` fail the scope. To handle an expected failure
    * without cancelling siblings, catch inside `fn` and return an
    * error-as-value result.
+   *
+   * **Task bodies must yield periodically.** A synchronous loop with no
+   * `await` will monopolize the event loop and prevent cancellation from
+   * propagating. If your task has no natural I/O (pure computation, tight
+   * numeric loop), call `yieldNow(s.signal)` inside the loop. Without a
+   * yield point, the scheduler cannot interrupt the task; the scope will
+   * appear hung until the loop completes, even if the deadline fires or
+   * the external signal aborts. Hot sync loops can also exhaust memory
+   * before cancellation propagates.
    */
   spawn<T>(fn: () => Promise<T> | T): Task<T>
 
@@ -74,6 +83,29 @@ export interface Scope {
    * `active < limit` indicates headroom to spawn more work.
    */
   readonly active: number
+
+  /**
+   * Cumulative count of tasks that reached the `"completed"` terminal state
+   * in this scope. Monotonic. Useful for progress reporting and for driver
+   * loops that want to observe finished work independent of `active`.
+   */
+  readonly completed: number
+
+  /**
+   * Cumulative count of tasks that reached the `"failed"` terminal state
+   * (uncaught throw from task body). Monotonic. Under fail-fast, this is
+   * at most 1 before the scope cancels — further task errors that land
+   * during cancellation are counted as `cancelled`, not `failed`.
+   */
+  readonly failed: number
+
+  /**
+   * Cumulative count of tasks that reached the `"cancelled"` terminal
+   * state — either because the scope cancelled them before execution
+   * (queued under `{ limit }`) or because they were running when the
+   * scope cancelled. Monotonic.
+   */
+  readonly cancelled: number
 }
 
 /**
@@ -88,27 +120,49 @@ export interface Task<T> extends PromiseLike<T> {
 /**
  * Options for `scope(options, fn)`.
  *
- * All fields are optional and independent. If multiple time bounds are set
- * (`timeout` and `deadline`), `deadline` takes precedence.
+ * All fields are optional and independent.
+ *
+ * ## Settle-reason precedence
+ *
+ * When multiple options race, the first to fire wins the scope's settle
+ * reason. Summarised:
+ *
+ * | First to fire            | Scope settles with                        |
+ * |--------------------------|-------------------------------------------|
+ * | `signal` aborts          | rejects with `signal.reason` (identity kept) |
+ * | `deadline` reached       | rejects with `DeadlineError` (`.cause = "deadline"`) |
+ * | `timeout` elapsed        | rejects with `TimeoutError` (`.cause = "timeout"`)   |
+ * | `scope.cancel(reason)`   | rejects with `reason` (identity kept)     |
+ * | `scope.done()`           | **resolves**; `signal.reason = ScopeDoneSignal` |
+ *
+ * If both `timeout` and `deadline` are set, `deadline` takes precedence
+ * (its absolute-time semantics win the timer). An external `signal` that
+ * aborts before the timer fires wins the reason race — the synthetic
+ * `DeadlineError` / `TimeoutError` is never constructed in that case.
  */
 export interface ScopeOptions {
   /**
    * **Relative** duration in milliseconds. If the scope hasn't completed
-   * within this window, it is cancelled and rejects with `TimeoutError`.
+   * within this window, it is cancelled and rejects with `TimeoutError`
+   * (`.cause === "timeout"`).
    *
    * Contrast with `deadline` (absolute). Use `timeout` for "finish within N
-   * ms"; use `deadline` for "finish before timestamp T".
+   * ms"; use `deadline` for "finish before timestamp T". If both are set,
+   * `deadline` wins.
+   *
+   * Use `instanceof ScopeCancelledError` to catch both `TimeoutError` and
+   * `DeadlineError` in one branch.
    */
   timeout?: number
 
   /**
    * **Absolute** timestamp (milliseconds since epoch, `Date.now()`-based).
    * If the scope hasn't completed by this time, it is cancelled and rejects
-   * with `TimeoutError`.
+   * with `DeadlineError` (`.cause === "deadline"`).
    *
    * Deadlines are composable: compute once at a top-level entry point and
    * pass down through nested scopes to enforce a single end-time across the
-   * whole tree.
+   * whole tree. Contrast with `timeout` (relative duration).
    */
   deadline?: number
 
@@ -126,8 +180,13 @@ export interface ScopeOptions {
 
   /**
    * External AbortSignal. If it aborts, the scope cancels and rejects with
-   * `signal.reason` (identity preserved). Use this to wire SIGINT, request
-   * cancellation, or parent-scope cancellation down to nested scopes.
+   * `signal.reason` (identity preserved — the scope does not wrap it).
+   * Use this to wire SIGINT, request cancellation, or parent-scope
+   * cancellation down to nested scopes.
+   *
+   * If the signal aborts before `timeout`/`deadline` fires, the signal
+   * reason wins — `DeadlineError`/`TimeoutError` is never constructed. See
+   * the precedence table in `ScopeOptions`.
    *
    * Nested scopes do **not** automatically inherit the parent's signal —
    * pass `{ signal: parent.signal }` explicitly. This is deliberate

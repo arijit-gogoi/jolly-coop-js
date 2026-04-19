@@ -75,10 +75,70 @@ export class DeadlineError extends ScopeCancelledError {
  * `cause === "done"`. Named "Signal" (not "Error") because it represents
  * intentional shutdown, not a failure; it's an `Error` subclass only so
  * `AbortSignal.reason` consumers that expect Error-shaped values work.
+ *
+ * A surprising consequence: a naive `catch (err)` block that treats every
+ * `Error` as a failure will mis-classify a graceful `done()` reason. Use
+ * `isStructuralCancellation` to discriminate at the catch site.
  */
 export class ScopeDoneSignal extends ScopeCancelledError {
   constructor(message = "Scope done") {
     super("done", message)
     this.name = "ScopeDoneSignal"
   }
+}
+
+/**
+ * True if `reason` is one of the errors Jolly itself synthesized for a
+ * structural cancellation cause: `TimeoutError`, `DeadlineError`, or
+ * `ScopeDoneSignal`. False otherwise — including when `reason` is a
+ * user-supplied `cancel(reason)` value, an external `signal.reason`, or
+ * any non-runtime error.
+ *
+ * Use this at catch sites and on `s.signal.reason` to ask "did the runtime
+ * cancel this for a structural reason?" without an `instanceof` chain over
+ * the three concrete classes.
+ *
+ * ```ts
+ * try { await scope(opts, fn) }
+ * catch (err) {
+ *   if (isStructuralCancellation(err)) {
+ *     // runtime decided: timeout, deadline reached, or graceful done
+ *   } else {
+ *     // err is whatever was passed to cancel(reason) or signal.reason
+ *     throw err
+ *   }
+ * }
+ * ```
+ */
+export function isStructuralCancellation(reason: unknown): reason is ScopeCancelledError {
+  return reason instanceof ScopeCancelledError
+}
+
+/**
+ * True if `reason` is a non-structural cancellation — i.e. it's a non-null
+ * value that is *not* a `ScopeCancelledError`. Captures the "this was a
+ * cancellation I (or upstream) caused, not the runtime" case.
+ *
+ * The complement of `isStructuralCancellation` *for non-null inputs*.
+ * Returns false for `null`/`undefined`/`0`/`""` to avoid a positive read
+ * on absence-of-reason.
+ *
+ * Use to distinguish user-driven cancellations (manual `cancel(reason)`,
+ * external signal aborts) from runtime-driven ones at catch sites where
+ * both paths land in the same branch.
+ *
+ * ```ts
+ * try { await scope({ signal: ctl.signal }, fn) }
+ * catch (err) {
+ *   if (isStructuralCancellation(err))      handleRuntime(err)
+ *   else if (isUserCancellation(err))       handleUserAbort(err)
+ *   else                                     throw err  // unexpected
+ * }
+ * ```
+ */
+export function isUserCancellation(reason: unknown): boolean {
+  if (reason === null || reason === undefined) return false
+  if (typeof reason === "string" && reason === "") return false
+  if (typeof reason === "number" && reason === 0) return false
+  return !(reason instanceof ScopeCancelledError)
 }

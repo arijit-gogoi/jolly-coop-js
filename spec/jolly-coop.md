@@ -78,6 +78,13 @@ export type Result<T, E = unknown> =
   | { ok: true; value: T }
   | { ok: false; error: E }
 
+// Duration parsing utility (for CLI flags / config wiring)
+export function parseDuration(input: number | string): number
+
+// Cancellation discriminator helpers
+export function isStructuralCancellation(reason: unknown): reason is ScopeCancelledError
+export function isUserCancellation(reason: unknown): boolean
+
 // Types
 export interface Scope {
   spawn<T>(fn: () => Promise<T> | T): Task<T>
@@ -130,9 +137,13 @@ The scope returns a promise that resolves with the return value of `fn`, or reje
 
 Suspends the current task for the specified number of milliseconds. If an `AbortSignal` is passed and it aborts before the timer elapses, `sleep` rejects with the signal's reason. Signals are **explicit** — `sleep` has no ambient signal context. To make a sleep cancellation-aware, pass `s.signal` from the enclosing scope.
 
+The `signal` parameter is optional to keep the simple `await sleep(50)` case in tests and one-off scripts terse. **In long-running task bodies, always pass a signal.** A `sleep(ms)` without a signal will run to completion even if the scope cancels — the timer fires, the task continues, and any side effects after the sleep execute despite the cancel having been requested. The runtime cannot enforce signal-passing at the type level without breaking the simple case; consumers building workflow runners or framework-style abstractions should layer their own context-aware variant (see §5.7) rather than calling `sleep` directly.
+
 ### 3.4 `yieldNow(signal?)`
 
 Yields control back to the scheduler, allowing other tasks in the run queue to execute. If an `AbortSignal` is passed and it aborts before the continuation runs, `yieldNow` rejects with the signal's reason. Long-running computational tasks should call `yieldNow` periodically to avoid starving other tasks.
+
+Same caveat as `sleep`: omitting `signal` produces a yield that ignores cancellation. Long-running tight loops should pass `s.signal` so the loop terminates promptly when the scope cancels.
 
 ### 3.5 `toResult(input)`
 
@@ -234,7 +245,52 @@ catch (err) {
 }
 ```
 
-Use `instanceof ScopeCancelledError` to unify all three structural causes in one catch branch; use `.cause` or narrower `instanceof` for discrimination.
+Use `instanceof ScopeCancelledError` to unify all three structural causes in one catch branch; use `.cause` or narrower `instanceof` for discrimination. The functions `isStructuralCancellation` and `isUserCancellation` (§3.17 and §3.18) wrap these checks for catch-site readability.
+
+### 3.17 `isStructuralCancellation(reason)`
+
+Type guard. True if `reason` is a `ScopeCancelledError` (i.e. one of `TimeoutError`, `DeadlineError`, `ScopeDoneSignal`). False for plain `Error`s, primitives, falsy values, and user-supplied cancel reasons.
+
+The recommended way to ask "did the runtime cancel this for a structural reason?" without writing `instanceof` against three concrete classes:
+
+```typescript
+try { await scope(opts, fn) }
+catch (err) {
+  if (isStructuralCancellation(err)) {
+    // err is narrowed to ScopeCancelledError; err.cause is "timeout" | "deadline" | "done"
+  } else {
+    throw err  // user-supplied or unexpected
+  }
+}
+```
+
+### 3.18 `isUserCancellation(reason)`
+
+True if `reason` is a non-null, non-empty value that is *not* a `ScopeCancelledError`. The complement of `isStructuralCancellation` for non-falsy inputs. False for `null` / `undefined` / `0` / `""` to avoid a positive read on absence-of-reason.
+
+Captures "this was a cancellation I (or upstream) caused, not the runtime." Use to distinguish manual `cancel(reason)` and external-signal aborts from runtime-driven cancellations at catch sites where both paths land in the same branch:
+
+```typescript
+try { await scope({ signal: ctl.signal }, fn) }
+catch (err) {
+  if (isStructuralCancellation(err))      handleRuntime(err)
+  else if (isUserCancellation(err))       handleUserAbort(err)
+  else                                     throw err  // unexpected (rare)
+}
+```
+
+### 3.19 `parseDuration(input)`
+
+Convert a duration to milliseconds. Accepts either a non-negative finite number (returned as-is) or a string in the form `<digits><unit>` where `unit` is one of `ms`, `s`, `m`, `h`. Examples: `"500ms"`, `"30s"`, `"2m"`, `"1h"`. Throws `TypeError` with a descriptive message on malformed input.
+
+Composes naturally with the time-bound scope options:
+
+```typescript
+await scope({ timeout: parseDuration("30s") }, fn)
+await scope({ deadline: Date.now() + parseDuration(opts.maxRuntime) }, fn)
+```
+
+Whitespace, fractional values, compound forms (`"1h30m"`), and units larger than `h` are deliberately rejected. The grammar is tight by design; consumers needing richer parsing should layer their own.
 
 ---
 
@@ -354,6 +410,38 @@ Within a single scope:
 - A task error racing the timer has normal fail-fast precedence: whichever reaches `cancel()` first wins `firstError`, and subsequent cancellations are no-ops (`cancel` is idempotent).
 
 Identity preservation matters: code like `try { await scope(...) } catch (e) { if (e === myReason) ... }` continues to work for manual and external cancellations.
+
+### 5.7 Layering Ambient Signal Context (Recipe)
+
+Some applications — workflow runners, request scopers, framework-style consumers — want their *user code* to call `sleep(ms)` or `fetch(url)` without explicitly passing a signal at every call site. The runtime deliberately doesn't ship this (see §5.5 for why), but it can be layered cleanly on top using `AsyncLocalStorage` (Node 20+) or equivalent. The pattern:
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks"
+import { scope, sleep as jollySleep } from "jolly-coop"
+
+interface Ctx { signal: AbortSignal }
+const ctx = new AsyncLocalStorage<Ctx>()
+
+// Wrapped primitives that auto-thread the ambient signal:
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return jollySleep(ms, signal ?? ctx.getStore()?.signal)
+}
+
+// Application entry point:
+export async function runWithAmbient<T>(fn: () => Promise<T>): Promise<T> {
+  return scope(async s => {
+    return ctx.run({ signal: s.signal }, fn)
+  })
+}
+```
+
+User code now writes `await sleep(100)` and the ambient context threads the scope's signal automatically. The runtime contract stays unchanged: `jollySleep` is still the explicit-signal primitive; the ambient layer is consumer-side opt-in.
+
+**Why this works where the v0.2.0 attempt failed.** The earlier failure used a module-scoped variable updated via `try/finally` around a sync call, which lost the signal at the first `await`. `AsyncLocalStorage` is purpose-built for this — it preserves context across async boundaries via Node's async-hooks machinery, the same mechanism `node:trace_events` and APM tools rely on.
+
+**Why the runtime still doesn't ship it.** `AsyncLocalStorage` is Node-only. Browsers don't have an equivalent; the closest (proposed `AsyncContext`) is years from baseline support. Shipping ambient as a core helper would either silently fail in browsers or force the runtime to ship a polyfill that re-introduces the v0.2.0 bug shape. Layering it externally lets Node consumers opt in and browser consumers stay safe.
+
+**When *not* to layer.** Tests, scripts, and code that's only run in well-defined call chains can pass `s.signal` explicitly without friction. The recipe is for genuinely ambient surfaces — workflow files written by users who don't know they're inside a scope, request handlers in a framework, etc.
 
 ---
 

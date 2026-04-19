@@ -81,6 +81,9 @@ Catching after `await t` is too late — the scope will have already started can
 | `sleep` | `(ms, signal?) => Promise<void>` | Cancellation-aware sleep. Pass `s.signal` to observe scope cancellation. |
 | `yieldNow` | `(signal?) => Promise<void>` | Yield to the scheduler. Pass `s.signal` to observe scope cancellation. |
 | `toResult` | `(p \| thunk) => Promise<Result<T>>` | Turn an expected-rejection promise into `{ ok, value } \| { ok, error }`. Preserves error identity. |
+| `parseDuration` | `(number \| string) => number` | Convert `"500ms"`/`"30s"`/`"2m"`/`"1h"` (or a raw ms number) to milliseconds. Throws on malformed input. Composes naturally with `{ timeout }` and `deadline: Date.now() + parseDuration(...)`. |
+| `isStructuralCancellation` | `(reason) => reason is ScopeCancelledError` | Type-guard: was this cancellation synthesized by the runtime (timeout/deadline/done)? See [Settle-reason precedence](#settle-reason-precedence). |
+| `isUserCancellation` | `(reason) => boolean` | Was this cancellation user-driven (manual `cancel(reason)` or external signal)? Truthy non-`ScopeCancelledError`. |
 | `TimeoutError` | class | Thrown when a scope's **relative** `timeout` elapses. Subclass of `ScopeCancelledError`, `.cause === "timeout"`. |
 | `DeadlineError` | class | Thrown when a scope's **absolute** `deadline` is reached. Subclass of `ScopeCancelledError`, `.cause === "deadline"`. |
 | `ScopeDoneSignal` | class | Signal reason when `s.done()` aborts the scope's signal. Subclass of `ScopeCancelledError`, `.cause === "done"`. Named "Signal" because it marks intentional shutdown, not failure. |
@@ -125,6 +128,7 @@ Load-bearing behaviors. Full JSDoc on hover in your IDE.
 - **`timeout`** — relative ms, fires `TimeoutError`. **`deadline`** — absolute `Date.now()`-based ts, fires `DeadlineError`. Both extend `ScopeCancelledError`. `deadline` wins if both are set.
 - **`spawn` is non-blocking.** Returns a `Task<T>` immediately; under `{ limit }` excess tasks queue FIFO and honor cancellation.
 - **Task bodies must yield.** A sync loop with no `await` can't be cancelled and may exhaust memory before abort propagates. Call `yieldNow(s.signal)` in tight loops without natural I/O.
+- **`sleep`/`yieldNow` accept an optional signal — *use it* in task bodies.** Omitting the signal produces a sleep that ignores cancellation and runs to its full duration even if the scope cancels. Acceptable in tests and one-off scripts; in long-running tasks always pass `s.signal`.
 - **`done()` resolves; `cancel(reason)` rejects.** `done` aborts `signal` with `ScopeDoneSignal` (graceful); `cancel` rejects with `reason` (identity preserved).
 - **Error identity is preserved.** `cancel(reason)` and external `signal.reason` pass through unwrapped. Only structural cancels (timeout, deadline, done) synthesize — all extend `ScopeCancelledError`.
 - **LIFO resource cleanup.** Disposers run in reverse registration order on scope exit. Disposer errors are contained.
@@ -144,15 +148,20 @@ When multiple cancellation sources race, the first to fire wins:
 
 ### Observing an expected rejection: `toResult`
 
-When rejection is anticipated (scope timed out, was cancelled), wrap the call in `toResult` to flatten into a discriminated union:
+When rejection is anticipated (scope timed out, was cancelled), wrap the call in `toResult` to flatten into a discriminated union, then use `isStructuralCancellation` to discriminate runtime-driven cancellation from user-driven ones without an `instanceof` chain:
 
 ```js
-import { scope, toResult, TimeoutError } from "jolly-coop"
+import { scope, toResult, isStructuralCancellation } from "jolly-coop"
 
 const r = await toResult(scope({ timeout: 500 }, async s => doWork(s)))
 if (!r.ok) {
-  if (r.error instanceof TimeoutError) handleTimeout()
-  else throw r.error // unexpected
+  if (isStructuralCancellation(r.error)) {
+    // runtime decided: timeout, deadline, or graceful done
+    // r.error.cause is "timeout" | "deadline" | "done"
+  } else {
+    // r.error is exactly the cancel(reason) or external signal.reason
+    throw r.error
+  }
 }
 ```
 
@@ -160,17 +169,22 @@ if (!r.ok) {
 
 ### Error categorization
 
+For finer-grained branching, use `.cause` directly. The two helpers cover the common groupings; `instanceof` and `.cause` cover everything else.
+
 ```js
 try { await scope(opts, fn) }
 catch (err) {
-  if (err instanceof ScopeCancelledError) {
+  if (isStructuralCancellation(err)) {
     switch (err.cause) {
       case "timeout":  // relative `timeout` elapsed
       case "deadline": // absolute `deadline` reached
       case "done":     // unreachable — done() resolves, doesn't throw
     }
-  } else {
+  } else if (isUserCancellation(err)) {
     // err is the cancel(reason) or external signal.reason — identity preserved
+  } else {
+    // err is null/undefined/empty — unusual; treat as unexpected
+    throw err
   }
 }
 ```
